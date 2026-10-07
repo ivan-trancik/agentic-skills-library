@@ -1,0 +1,160 @@
+# Implementation plan from the October 2026 research cycle
+
+Derived from [report.md](report.md), whose prioritised list this plan turns into work items. Items are grouped in phases and ordered by value for cost within each phase. Each one says what to change, where, why, and how to check it.
+
+Tags: **Verified** rests on documentation or a measurement on Codex CLI 0.160.1 and Claude Code 2.1.292 on 7 October 2026; **Inference** is reasoning from those facts or from the studies in the report; **Vendor claim** rests on a figure from the party selling or operating a tool. Status boxes: `[ ]` open, `[x]` done, `[-]` dropped, with the reason next to it.
+
+Nothing below changes the design. A reviewer from the other vendor, must-fix findings only, a trend-based stop with a diff budget, a decisions file, a plan that starts from the user's words: the research supports all of it. The plan hardens the mechanics that carry that design.
+
+## Decisions to make first
+
+| Decision | Options | Recommendation |
+|---|---|---|
+| Claude reviewer context | `--safe-mode` drops CLAUDE.md, skills and MCP servers from the reviewer run; the default keeps them | `--safe-mode`. The reviewer needs the repository, not the user's instruction files, and one measured launch cost about $0.59 of cache creation before the reviewer did anything. |
+| Screenshot capture | Tile the headless Chrome output, or move `screenshot.sh` to a Playwright script | Playwright. It also gives clicks, dark mode, device emulation and true full-page capture; tiling alone fixes legibility only. |
+| Codex round one | Plain `codex exec` with our prompt, or `codex exec review "<prompt>"`, which keeps Codex's own rubric | Try `codex exec review` on two real tasks and compare the findings before switching. |
+| Round cap | Three rounds, the modal practitioner choice, or five as in superpowers | Three, with verify-only first in rounds two and three. |
+| Disputed findings | Leave them for the user, or run a fresh third reviewer as referee first | Referee, then the user. It costs one more launch only when a dispute exists. |
+| Publishing | Keep the repository private with `install.sh`, or publish it so `npx skills add` and plugin marketplaces work | Decide after Phase 4. |
+
+## Phase 1: the reviewer cannot edit, and the launches are correct
+
+### 1.1 Make the Claude reviewer unable to edit `[ ]`
+
+- Change: in `skills/review-loop/reviewer.sh`, replace `--allowedTools "Bash,Read,Grep,Glob"` with `--permission-mode dontAsk --permission-prompts none`, allow rules for `Read`, `Grep`, `Glob`, `Bash(git status *)`, `Bash(git diff *)`, `Bash(git log *)`, `Bash(git show *)`, `Bash(mkdir -p .local/scratch*)` and the project's check commands, and `--disallowedTools "Edit" "Write" "NotebookEdit" "mcp__*"`. Keep the fingerprint check as the backstop.
+- Why: a bare `Bash` entry approves every shell command, and in `auto` permission mode Claude Code drops it silently. **Verified** in the CLI reference, the permission modes page and the headless page.
+- Check: run the reviewer on a scratch repository with a prompt that asks it to edit a file. The edit must be denied and `state.sh` must print the same fingerprint. Then run it on a project whose checks use `npm test` or `pytest` to see whether prefix rules cover the subprocesses they spawn. **Inference** until tested.
+- Open question: check commands differ per project. Either the builder writes them to `.local/review-checks` for the script to allow, or the script allows the common runners.
+
+### 1.2 Harden and cheapen the `claude -p` launch `[ ]`
+
+- Change: add `--settings '{"disableAllHooks":true}' --strict-mcp-config --no-session-persistence --max-turns <n> --max-budget-usd <x>`; prefer `--safe-mode` over `--bare`, which never reads OAuth credentials; use `--output-format json` so the builder can read `result`, `permission_denials` and `total_cost_usd`.
+- Why: a `-p` session runs the repository's hooks and `.mcp.json` servers with no trust prompt. **Verified** in the permissions and headless pages. The saving from `--safe-mode` is **Inference** until measured.
+- Check: review the same diff with and without `--safe-mode` and compare `total_cost_usd` and the findings.
+
+### 1.3 Fix the Codex launch `[ ]`
+
+- Change: drop `-c model_reasoning_effort=high` or expose it as an option; make the `-o` path absolute from `git rev-parse --show-toplevel`; move the ten-minute timeout from prose into the script with `perl -e 'alarm shift; exec @ARGV' 600 codex exec ...`, since macOS has no `timeout`; on timeout, resume with `codex exec -o <fresh file> resume <session id> "Reply now with your complete findings" < /dev/null` instead of restarting; tell the prompt that `.git` and the home directory are write-protected in the sandbox, so a denied cache write is not reported as a project bug.
+- Why: the user's `~/.codex/config.toml` sets `xhigh`, so `high` lowers the reviewer below the README's promise of the harness default; `workspace-write` denies `.git`, `~/.cache` and the network. **Verified** in the config reference and by a sandbox probe.
+- Check: the reviewer log shows the configured effort; a forced timeout resumes and still produces findings.
+
+### 1.4 Evaluate `codex exec review` for round one `[ ]`
+
+- Change: run round one as `codex exec review -s workspace-write -o out.md "<prompt>" < /dev/null`, mapping P0 and P1 to must-fix and P2 and P3 to a "mentioned, not fixed" tail. Keep plain `codex exec` for design reviews: `exec review` has no `--image` and rejects `--worktree`.
+- Why: a custom prompt replaces only the user message, so Codex's rubric comes for free: a confidence score per finding, "the author would fix it", "pre-existing bugs should not be flagged", "provably affected". **Verified** flags and rubric text; the mapping of P-levels is **Inference**.
+- Check: review the same diff both ways on two tasks and compare findings and false positives.
+
+## Phase 2: loop rules, prompt and ledger
+
+### 2.1 Hard round cap, named exit, verify-only first `[ ]`
+
+- Change: in `skills/review-loop/SKILL.md`, cap the loop at three review-fix rounds. Rounds two and three first verify the previous fixes, then look for new must-fix items. The final summary names the exit that fired: clean, count rose, second plateau, diff budget, or round cap.
+- Why: gains concentrate in rounds one and two; a second review round added 62% more false positives for little recall; a budget exit looks identical to convergence unless it is named. **Inference** from arXiv 2603.16244 and 2604.10508 and from practitioner caps of two to five rounds.
+- Check: the summary of a real loop states its exit; a loop with a large round one ends by round three.
+
+### 2.2 Rubric tests, confidence field and verdict line `[ ]`
+
+- Change: in `skills/review-loop/reviewer-prompt.md`, add the tests: the bug must be introduced by this change; speculation about other code counts only if that code is provably affected; no unstated assumptions about intent; report only what the author would fix if they knew, and prefer no findings otherwise; one paragraph per finding with code quotes of at most three lines, stating the inputs that trigger the failure. Add a confidence per finding, `confirmed-by-running`, `confirmed-by-reading` or `plausible`, a first line `VERDICT: PASS|NEEDS_CHANGES` with a tally, and the sentence "zero findings is a valid result".
+- Why: these are Codex's own rubric tests and Claude Code's verify vote. **Verified** text of both.
+- Check: a run on a known-clean diff returns `VERDICT: PASS` and no findings.
+
+### 2.3 Structured output `[ ]`
+
+- Change: use `claude -p --output-format json --json-schema <schema>` and `codex exec --output-schema schema.json` so `review-loop` reads a `must_fix` array mechanically and keeps sub-threshold findings in a summary without reopening them.
+- Why: both flags exist. **Verified**. Keeping sub-threshold findings visible is the pattern of Qodo and of Claude Code Review.
+- Check: `jq .must_fix` on the output file.
+
+### 2.4 Refute step and referee `[ ]`
+
+- Change: after the reviewer's list, run one more reviewer turn whose only job is to refute each finding by quoting the line that disproves it, and drop refuted items before the builder sees them. Findings the builder still disputes go to a fresh third reviewer run before they reach the user.
+- Why: having a fresh model try to refute a result is Anthropic's own guidance; adversarial gates removed about 79% of candidates in one security pipeline; a finding repeated across rounds is not thereby confirmed. **Inference**.
+- Check: the log counts refuted items per round and the cost of the extra turn.
+
+### 2.5 A findings ledger instead of settled choices `[ ]`
+
+- Change: `.local/decisions.md` records every finding with an identity by behaviour and cause, a status of `open`, `fixed`, `rejected`, `deferred`, `settled` or `disputed`, the round it came from and the fix that resolved it. Dismissals carry one reason code: `wrong`, `not worth fixing`, `already handled`, `style` or `duplicate`. Choices are written as a ruling with the what, the why and the cost if wrong. The reviewer adds a "Declined to judge" list of behaviours it set aside. Rounds two and three receive the previous findings verbatim with their dispositions.
+- Why: practitioner ledgers converged on this shape, and fleet data showed 44% of later findings landing in code the previous fix changed. **Inference**.
+- Check: a reworded re-raise matches an existing entry; the final report separates reviewer errors from the other dismissal reasons.
+
+### 2.6 Protect the tests in fix rounds `[ ]`
+
+- Change: in later rounds the reviewer diffs the test files first; the changed-file list comes from git, never from the builder's report; optionally a WIP commit per round, squashed at the end, so each review has a stable revision.
+- Why: builders measurably weaken tests under pressure, and read-only tests stopped that without hurting honest work. **Inference**.
+- Check: weaken a test deliberately in a fixture repository; the reviewer flags it.
+
+### 2.7 Right-size the ceremony `[ ]`
+
+- Change: in `instructions/how-to-work-on-a-task.md`, add a sizing step: if the diff can be described in one sentence, skip the plan and the plan review; cross-review stays for everything that changes behaviour. At the end of the loop, check the diff against `.local/plan.md`.
+- Why: vendor guidance and practitioner cost complaints; planning is a cost saver rather than an accuracy gain for strong models, and a subpar plan hurts more than none, which is the argument for keeping plan review wherever a plan exists. **Vendor claim and practice**.
+- Check: a one-line fix goes straight to build and the review loop.
+
+## Phase 3: design review pipeline
+
+### 3.1 Fix the capture before tuning the prompt `[ ]`
+
+- Change: tile the full-page capture into slices of at most 1568 px, or replace `screenshot.sh` with a Playwright script that gives `fullPage`, device descriptors, `emulateMedia({colorScheme:'dark'})` and `animations:'disabled'`. Add a 768 px pass, a dark-mode capture and a Tab-press focus capture. Label images in file-list order.
+- Why: Anthropic's documented resize rule shrinks 1440x4000 to about 564x1568 on standard-tier models, so 16 px text lands at about 6 px. **Verified** rule; the figure is computed from it.
+- Check: text in every delivered image is still legible after the vendor's resize.
+
+### 3.2 Delivery check and stated counts `[ ]`
+
+- Change: include a canary image with a random word that the reviewer must transcribe first. Have the builder state the expected counts and the states not captured in `.local/design-context.md`. Change the prompt from "count it" to "verify the stated count".
+- Why: one issue reports total fabrication of image content in `-p` mode when the image data did not arrive; both vendors document weak counting and small-text reading. **Verified** issue report and vendor limitations.
+- Check: remove the canary file and confirm the reviewer reports it missing instead of describing it.
+
+### 3.3 Objective checks `[ ]`
+
+- Change: run `@axe-core/playwright` for contrast, labels and focus; optionally a same-session `pixelmatch` on pages the task did not touch and an accessibility-snapshot text diff for "information no longer reachable". Feed the results to the reviewer with the rule "problems over prescriptions".
+- Why: structured inputs lift vision-model accuracy sharply on exactly the defects the prompt asks about. **Inference**; the tooling facts are **Verified**.
+- Check: a deliberately low-contrast button is caught by axe and relayed by the reviewer.
+
+## Phase 4: skill hygiene, installer and distribution
+
+### 4.1 Make `ship` explicit-only `[ ]`
+
+- Change: add `disable-model-invocation: true` to `skills/ship/SKILL.md`; add `skills/ship/agents/openai.yaml` with `policy: allow_implicit_invocation: false`; optionally a PreToolUse hook that denies a force-push to the default branch. Note in the README that this departs from OpenAI's advice not to infer explicit-only invocation from sensitivity.
+- Why: both mechanisms are documented, and Codex's bundled `review-agent` skill uses the same policy. **Verified**.
+- Check: `claude -p "ship this"` does not load the skill while `/ship` does; in Codex, `$ship` works and the skill is absent from the implicit list.
+
+### 4.2 Relative script paths and no cross-skill dependency `[ ]`
+
+- Change: move helpers under `scripts/` and refer to them relative to the skill root, using `${CLAUDE_SKILL_DIR}` in Claude Code. Give `review-plan` and `review-design` their own copy of the runner, or a shared runner skill they call by name. Add `metadata` with a version and source to each `SKILL.md`.
+- Why: the Agent Skills specification and both vendors say relative paths; the hard-coded `~/.agents/skills/...` breaks project-scope installs and plugin packaging. **Verified** guidance; the breakage is **Inference**.
+- Check: install the skills into a project's `.agents/skills` folder and run a review from there.
+
+### 4.3 Installer checks and validators `[ ]`
+
+- Change: add `install.sh --check` to compare installed copies with the repository; warn when `~/.codex/skills/<name>` exists; record the source commit in the marker; run `skills-ref validate`, `claude plugin validate` and Codex's `quick_validate.py` from a check script. Avoid the `compatibility` key while Codex's validator rejects it.
+- Why: Codex still scans `~/.codex/skills`, so a same-name skill there shadows the installed one, and the validators disagree on allowed keys. **Verified** by probe and docs.
+- Check: a duplicate in `~/.codex/skills` produces a warning; all validators pass.
+
+### 4.4 Give this repository the checks it asks of others `[ ]`
+
+- Change: add an `AGENTS.md` with the checks: `bash -n` and `shellcheck` on the scripts, the validators from 4.3, and a smoke test that runs `reviewer.sh` against a fixture repository.
+- Why: the skills take "the project's checks" from `AGENTS.md`, and this repository has none, so its own review loops run unchecked.
+- Check: the review loop on this repository runs the checks.
+
+### 4.5 A second install path `[ ]`
+
+- Change: when the repository is public, keep the `skills/<name>/SKILL.md` layout so `npx skills add <owner>/agentic-skills-library` works, and optionally add plugin manifests for both harnesses. On the Claude side the instruction block can become an `@~/.agents/instructions/how-to-work-on-a-task.md` import; Codex keeps the verbatim copy, since it has no import syntax.
+- Why: the Vercel `skills` CLI uses the same canonical `.agents/skills` plus symlink layout as `install.sh`, and adds a lockfile and an update check. **Verified**.
+- Check: a fresh machine installs by either path and both harnesses list the skills.
+
+## Phase 5: instrumentation and cadence
+
+### 5.1 Log every round `[ ]`
+
+- Change: append one line per round to `.local/loop-log.jsonl`: findings reported, accepted, rejected, disputed and refuted; whether each finding lies in code the previous fix changed; the `lines` value; wall time; cost from the JSON output. Keep the logs across sessions.
+- Why: the same class of tool lands anywhere between 7% and 75% acceptance depending on policy, and no controlled study of Claude reviewing Codex or the reverse on real repositories exists. **Inference**.
+- Check: after ten loops the logs answer how many rounds ran, how much was accepted, and how often the cap fired.
+
+### 5.2 Research cadence `[ ]`
+
+- Change: run a cycle as described in `research/README.md` each quarter, or when either CLI changes its minor version. Consider a `research-cycle` skill that scaffolds the folder and the thread prompts.
+- Check: the cycles table in `research/README.md` grows.
+
+## Not planned, and why
+
+- Moving from CLI-to-CLI to MCP bridges: `codex mcp-server` was removed, and `claude mcp serve` exposes tools rather than a reviewing model. **Verified**.
+- Hosted visual regression services: they add accounts and uploads to a local two-agent loop, and one of them, Lost Pixel, was archived in April 2026.
+- Letting the loop push or merge: every surveyed library hands the merge to the human, and `ship` stays explicit.

@@ -1,0 +1,3 @@
+# LF on every platform: the scripts run under bash, and the installer copies
+# the skills as they are, also on Windows checkouts with core.autocrlf=true.
+* text=auto eol=lf

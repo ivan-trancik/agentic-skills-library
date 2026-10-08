@@ -9,10 +9,11 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 # Keep the working files under .local/ out of git in repos that don't ignore it themselves.
+# check-ignore can't match /.local/ until the folder exists, so look for the line too.
 if ! git check-ignore -q .local 2>/dev/null; then
   exclude="$(git rev-parse --git-path info/exclude)"
   mkdir -p "$(dirname "$exclude")"
-  echo "/.local/" >> "$exclude"
+  grep -qxF "/.local/" "$exclude" 2>/dev/null || echo "/.local/" >> "$exclude"
 fi
 
 tracked="$(git diff HEAD --numstat | awk '{ n += $1 + $2 } END { print n + 0 }')"

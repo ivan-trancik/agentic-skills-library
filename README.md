@@ -64,6 +64,8 @@ Run `./install.sh` from Git Bash, which comes with Git for Windows. Developer Mo
 
 On Windows the installer puts a second marked copy of each skill in `~/.claude/skills/<name>` instead of a link, because Git Bash's `ln -s` makes a plain copy unless Developer Mode is on and `MSYS=winsymlinks:nativestrict` is set. Reinstalling replaces the copies, `--uninstall` removes them, and a same-name folder without the marker is left alone. If another program holds a file in a copy open, the installer leaves that copy whole and says what to close. It also warns when bash's `HOME` isn't the Windows user folder, which is where both agents look.
 
+`screenshot.sh` finds Chrome, or Edge where Chrome isn't installed, and runs it on a throwaway profile. Headless Chrome and Edge on Windows won't lay a page out narrower than about 500 px, so the 390 px phone shot is the left part of a wider layout; the script says so when it happens. The plan's move to Playwright (3.1) would fix that.
+
 ## What a project needs
 
 - An `AGENTS.md` that says how to run its checks, such as tests and a typecheck. The skills refer to "the project's checks" and look there. Claude Code reads a project `AGENTS.md` natively since version 2.1.277 when there is no `CLAUDE.md`; a `CLAUDE.md` containing `@AGENTS.md` still works.

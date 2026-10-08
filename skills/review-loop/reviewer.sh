@@ -30,15 +30,25 @@ log="${out%.*}.log"
 # Stop the reviewer from reporting itself to Superset as this workspace's agent.
 unset SUPERSET_TERMINAL_ID SUPERSET_TAB_ID SUPERSET_PANE_ID
 
+# Says so on the console when the reviewer's CLI is missing; otherwise the only
+# trace is a "command not found" in the log.
+require() {
+  command -v "$1" > /dev/null 2>&1 && return 0
+  echo "the $1 CLI is not on PATH; install it ($2), sign in once, and run this again" | tee "$log" >&2
+  exit 127
+}
+
 # stdin is closed on purpose: both CLIs can wait forever on an open one.
 case "$agent" in
   codex)
+    require codex "npm install -g @openai/codex"
     images=()
     for image in "$@"; do images+=("--image=$image"); done
     codex exec -s workspace-write -c model_reasoning_effort=high \
       ${images[@]+"${images[@]}"} -o "$out" "$prompt" < /dev/null > "$log" 2>&1
     ;;
   claude)
+    require claude "see https://code.claude.com/docs/en/setup"
     if [ $# -gt 0 ]; then
       prompt="$prompt"$'\n\nRead each of these screenshots with your file-reading tool:\n'"$(printf -- '- %s\n' "$@")"
     fi

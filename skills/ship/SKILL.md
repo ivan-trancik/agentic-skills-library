@@ -1,6 +1,7 @@
 ---
 name: ship
 description: Commit the current work, push the branch, open a pull request against the default branch and squash-merge it. Use only when the user explicitly asks to ship; never on your own initiative.
+disable-model-invocation: true
 ---
 
 Ship the work in this checkout. Stop and report at the first step that fails; never force a push or a merge.

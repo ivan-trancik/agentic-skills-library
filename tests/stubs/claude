@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Stands in for the claude CLI in tests/check.sh: records its arguments and
+# prints a result shaped like `--output-format json`, without calling a model.
+#
+#   STUB_RECORD  folder where each call's arguments are saved, NUL-separated
+#   STUB_REPLY   the result text
+#   STUB_ERROR   when set, the run reports an error instead of a result
+#   STUB_SLEEP   seconds to wait first, in a child process
+set -euo pipefail
+
+n=1
+while [ -e "$STUB_RECORD/claude.$n" ]; do n=$((n + 1)); done
+printf '%s\0' "$@" > "$STUB_RECORD/claude.$n"
+
+if [ -n "${STUB_SLEEP:-}" ]; then
+  sleep "$STUB_SLEEP" &
+  echo $! > "$STUB_RECORD/claude.child"
+  wait
+fi
+
+if [ -n "${STUB_ERROR:-}" ]; then
+  jq -n '{type: "result", subtype: "error_max_budget_usd", is_error: true, result: "budget reached"}'
+else
+  jq -n --arg result "${STUB_REPLY-NO MUST-FIX FINDINGS}" \
+    '{type: "result", subtype: "success", is_error: false, result: $result,
+      total_cost_usd: 0.01, permission_denials: []}'
+fi

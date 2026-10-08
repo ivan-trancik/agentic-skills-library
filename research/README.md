@@ -17,7 +17,7 @@ research/
 
 | Cycle | Question | Outcome |
 |---|---|---|
-| [2026-10-07 cross-agent review landscape](2026-10-07-cross-agent-review-landscape/report.md) | What do comparable libraries, the CLIs' built-in review commands, standards and studies do, and what should this library borrow? | Design confirmed. Sixteen improvements in the [plan](2026-10-07-cross-agent-review-landscape/plan.md), none implemented yet. |
+| [2026-10-07 cross-agent review landscape](2026-10-07-cross-agent-review-landscape/report.md) | What do comparable libraries, the CLIs' built-in review commands, standards and studies do, and what should this library borrow? | Design confirmed. Sixteen improvements in the report, twenty-one items in the [plan](2026-10-07-cross-agent-review-landscape/plan.md); 1.1 to 1.3, 2.1, 4.1 and 4.4 done on 8 October 2026. |
 
 ## Running a cycle
 
@@ -32,6 +32,7 @@ Either agent can run a cycle. The first one was run from Claude Code with its de
 
 ## What to re-verify each cycle
 
+- Run `tests/live.sh`. It checks the headless flags `reviewer.sh` depends on, the deadline and the `ship` invocation settings against the installed CLIs.
 - Where each harness discovers skills, and whether symlinks are followed.
 - The headless flags `reviewer.sh` depends on: permission modes and allow rules for `claude -p`, sandbox modes and `-o` for `codex exec`, image attachment for both.
 - Whether the built-in review commands, `codex exec review` and `/code-review`, changed their rubric or output.

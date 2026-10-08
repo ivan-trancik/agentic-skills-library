@@ -16,7 +16,7 @@ Have the other coding agent review the page you changed, from screenshots. This 
 
    Add one for each state the task is about, such as an opened row or an empty page. The script can't click, so use your own browser tools for those.
 3. Write `.local/design-context.md`: the user's design goals, word for word; what you changed; and each screenshot's file name with what it shows.
-4. Run the reviewer from the repository root, in the foreground with a 10-minute timeout, passing every screenshot. Pass `codex` if you are Claude Code and `claude` if you are Codex:
+4. Run the reviewer from the repository root, in the foreground with a 10-minute timeout, passing every screenshot. The script keeps the reviewer read-only and stops it if it runs past eight minutes. Pass `codex` if you are Claude Code and `claude` if you are Codex:
 
    ```
    ~/.agents/skills/review-loop/reviewer.sh <codex|claude> ~/.agents/skills/review-design/reviewer-prompt.md .local/design-review.md .local/design/desktop.png .local/design/desktop-full.png .local/design/phone.png

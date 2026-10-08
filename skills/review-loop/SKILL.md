@@ -11,8 +11,9 @@ The user asking for this skill is permission to commit when the loop ends clean,
 
 1. Run the project's checks (see `AGENTS.md`) and fix any failure.
 2. Create `.local/` if needed. Write `.local/review-context.md`: a few lines on what the work is meant to do and where the task is described.
-3. Create `.local/decisions.md` if it doesn't exist, with two sections. "Settled choices" records what the user has already decided in this session, one line each. "Rounds" is where you log each round.
-4. Run `~/.agents/skills/review-loop/state.sh` and record its `lines` value under "Rounds" as the starting size.
+3. Write each check command you ran to `.local/review-checks`, one per line, exactly as you ran it; split a chain joined with `&&` into its commands. The reviewer may run these as written. A command with a `*` can't be allowed exactly, so put it in a script and list the script.
+4. Create `.local/decisions.md` if it doesn't exist, with two sections. "Settled choices" records what the user has already decided in this session, one line each. "Rounds" is where you log each round.
+5. Run `~/.agents/skills/review-loop/state.sh` and record its `lines` value under "Rounds" as the starting size.
 
 ## Each round
 
@@ -20,12 +21,12 @@ The user asking for this skill is permission to commit when the loop ends clean,
 2. Run the reviewer from the repository root, replacing N with the round number. Pass `codex` if you are Claude Code and `claude` if you are Codex:
 
    ```
-   ~/.agents/skills/review-loop/reviewer.sh <codex|claude> ~/.agents/skills/review-loop/reviewer-prompt.md .local/review-round-N.md
+   ~/.agents/skills/review-loop/reviewer.sh --run-checks <codex|claude> ~/.agents/skills/review-loop/reviewer-prompt.md .local/review-round-N.md
    ```
 
-   Run it in the foreground with a 10-minute timeout and wait for it. Only if it times out, run it again in the background, and then do nothing else until it has finished: never end your turn while the reviewer is running, because that can kill it. If the reviewer can't run or writes no findings, stop and report; don't review your own work instead.
+   Run it in the foreground with a 10-minute timeout and wait for it. The script stops a reviewer that runs past eight minutes, so it returns in time. If the reviewer can't run or writes no findings, stop and go to "Finish"; don't review your own work instead.
 
-3. Run `state.sh` again. If the fingerprint changed, the reviewer edited the work: stop and report.
+3. Run `state.sh` again. If the fingerprint changed, the reviewer, or a check it ran, changed the work: stop and go to "Finish".
 4. Read `.local/review-round-N.md`. If it has the line `NO MUST-FIX FINDINGS` and lists no findings, go to "Finish".
 5. Check each finding against the code and sort it:
    - Real: accept it.
@@ -41,14 +42,11 @@ The user asking for this skill is permission to commit when the loop ends clean,
 
 ## When to stop
 
-There is no fixed number of rounds. The loop continues only while it is converging, which you judge from the number of findings you accepted in each round:
+The loop runs at most three rounds, and continues only while it is converging, which you judge from the number of findings you accepted in each round:
 
 - Round 1: continue.
-- Fewer than the round before: continue.
-- The same number as the round before: continue once. A second round without a drop ends the loop.
-- More than the round before: stop.
-
-A count that keeps falling has to reach zero, so the loop always ends.
+- Round 2: continue if you accepted no more findings than in round 1; stop if you accepted more.
+- Round 3: stop, and leave its findings for the user.
 
 Also stop when the fixes outgrow the work: when `lines` has passed the starting size by more than half, or by more than 200 lines if that is the larger allowance. By then the review is turning the task into a bigger one, and the user should decide.
 
@@ -64,7 +62,7 @@ If the loop stopped for any other reason, don't commit. Leave the work as it is.
 
 Either way, summarise for the user:
 
-- how the loop ended and after how many rounds, with the accepted count for each round;
+- how the loop ended, named as one of: clean, count rose, round cap, diff budget, reviewer failed, or reviewer changed the work; after how many rounds; and the accepted count for each round;
 - what you fixed;
 - the findings still open, each with the simpler design you would use;
 - the findings you rejected or disputed, and why;

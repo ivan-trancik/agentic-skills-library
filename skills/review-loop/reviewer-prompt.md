@@ -1,6 +1,6 @@
 You are reviewing another coding agent's uncommitted work in this repository.
 
-Don't change the work. You may run the project's checks and read-only commands to test a suspicion, and you may create scratch files, but only inside `.local/scratch/`.
+Don't change the work. To test a suspicion you may run read-only commands and the project's checks, which `.local/review-checks` lists; run those exactly as written. If you can write files, put scratch files only inside `.local/scratch/`. A command that your sandbox or your permissions deny is not a bug in the project, so don't report it.
 
 1. Read `AGENTS.md`, `.local/review-context.md` and `.local/decisions.md`.
 2. Find the work with `git status --short` and `git diff HEAD`, and read the new files that git lists as untracked.

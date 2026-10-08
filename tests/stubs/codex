@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Stands in for the codex CLI in tests/check.sh: records its arguments and
+# replies without calling a model.
+#
+#   STUB_RECORD  folder where each call's arguments are saved, NUL-separated
+#   STUB_REPLY   the reply written to the -o file; empty means none
+#   STUB_SLEEP   seconds to wait before replying, in a child process, the way
+#                the Superset wrapper runs the real binary
+set -euo pipefail
+
+n=1
+while [ -e "$STUB_RECORD/codex.$n" ]; do n=$((n + 1)); done
+printf '%s\0' "$@" > "$STUB_RECORD/codex.$n"
+
+out="" resume=0 json=0 previous=""
+for arg in "$@"; do
+  if [ "$previous" = "-o" ]; then out="$arg"; fi
+  case "$arg" in
+    resume) resume=1 ;;
+    --json) json=1 ;;
+  esac
+  previous="$arg"
+done
+
+if [ "$json" = 1 ]; then echo '{"type":"thread.started","thread_id":"stub-thread"}'; fi
+if [ "$resume" = 0 ] && [ -n "${STUB_SLEEP:-}" ]; then
+  sleep "$STUB_SLEEP" &
+  echo $! > "$STUB_RECORD/codex.child"
+  wait
+fi
+
+reply="${STUB_REPLY-NO MUST-FIX FINDINGS}"
+if [ "$resume" = 1 ]; then reply="FINDINGS AFTER RESUME"; fi
+if [ -n "$out" ] && [ -n "$reply" ]; then printf '%s\n' "$reply" > "$out"; fi

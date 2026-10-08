@@ -6,6 +6,6 @@ Unless the prompt says to work without asking, follow these steps for any task t
 2. Build what was agreed, and run the project's checks (see its `AGENTS.md`).
 3. If the look or layout of a page changed, run the `review-design` skill, then show the user the screenshots and wait for their feedback.
 4. Run the `review-loop` skill.
-5. Stop after its commit and summary. Ship only when the user asks, with the `ship` skill.
+5. Stop after its commit and summary. Ship only when the user asks. The `ship` skill starts only when called by name: if the user asks in other words, ask them to type `/ship` in Claude Code or `$ship` in Codex.
 
 Questions, explanations and tasks that only run commands don't need a plan.

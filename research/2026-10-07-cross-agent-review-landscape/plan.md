@@ -17,28 +17,35 @@ Nothing below changes the design. A reviewer from the other vendor, must-fix fin
 | Disputed findings | Leave them for the user, or run a fresh third reviewer as referee first | Referee, then the user. It costs one more launch only when a dispute exists. |
 | Publishing | Keep the repository private with `install.sh`, or publish it so `npx skills add` and plugin marketplaces work | Decide after Phase 4. |
 
+Decided on 8 October 2026: `--safe-mode` for the Claude reviewer, together with `--restricted` (see 1.1), and a cap of three rounds.
+
 ## Phase 1: the reviewer cannot edit, and the launches are correct
 
-### 1.1 Make the Claude reviewer unable to edit `[ ]`
+### 1.1 Make the Claude reviewer unable to edit `[x]`
 
 - Change: in `skills/review-loop/reviewer.sh`, replace `--allowedTools "Bash,Read,Grep,Glob"` with `--permission-mode dontAsk --permission-prompts none`, allow rules for `Read`, `Grep`, `Glob`, `Bash(git status *)`, `Bash(git diff *)`, `Bash(git log *)`, `Bash(git show *)`, `Bash(mkdir -p .local/scratch*)` and the project's check commands, and `--disallowedTools "Edit" "Write" "NotebookEdit" "mcp__*"`. Keep the fingerprint check as the backstop.
 - Why: a bare `Bash` entry approves every shell command, and in `auto` permission mode Claude Code drops it silently. **Verified** in the CLI reference, the permission modes page and the headless page.
 - Check: run the reviewer on a scratch repository with a prompt that asks it to edit a file. The edit must be denied and `state.sh` must print the same fingerprint. Then run it on a project whose checks use `npm test` or `pytest` to see whether prefix rules cover the subprocesses they spawn. **Inference** until tested.
 - Open question: check commands differ per project. Either the builder writes them to `.local/review-checks` for the script to allow, or the script allows the common runners.
+- Done on 8 October 2026, corrected. `dontAsk` still honours the allow rules in user, project and local settings, and `--safe-mode` keeps them, so the reviewer runs with `--restricted`, which ignores every settings file; the script passes on only `model`, `effortLevel` and `modelSettings`. Check commands come from `.local/review-checks`, which the builder writes, and are allowed exactly: a prefix rule such as `Bash(npm test *)` also admits `npm test -- --updateSnapshot`. Read-only git needs no rule, and the scratch-folder rule was dropped, since the reviewer has no tool to write. Plan and design reviews give Claude no shell at all and run Codex `read-only`. The Codex code reviewer still runs `workspace-write` and can edit; the checks can write in either harness; the fingerprint stays the guard for both. `tests/live.sh` confirmed each denial on Claude Code 2.1.294. That version already ignores a project's allow rules until its workspace has been trusted, but the user's own repositories usually have been, and user-level rules apply everywhere.
 
-### 1.2 Harden and cheapen the `claude -p` launch `[ ]`
+### 1.2 Harden and cheapen the `claude -p` launch `[x]`
 
 - Change: add `--settings '{"disableAllHooks":true}' --strict-mcp-config --no-session-persistence --max-turns <n> --max-budget-usd <x>`; prefer `--safe-mode` over `--bare`, which never reads OAuth credentials; use `--output-format json` so the builder can read `result`, `permission_denials` and `total_cost_usd`.
 - Why: a `-p` session runs the repository's hooks and `.mcp.json` servers with no trust prompt. **Verified** in the permissions and headless pages. The saving from `--safe-mode` is **Inference** until measured.
 - Check: review the same diff with and without `--safe-mode` and compare `total_cost_usd` and the findings.
+- Done on 8 October 2026: `--restricted --safe-mode --strict-mcp-config --no-session-persistence --max-budget-usd 5 --output-format json`. `--restricted` and `--safe-mode` keep the repository's hooks out in place of `disableAllHooks`. `--max-turns` was left out: reaching it ends the run with an error and no findings. Measured by `tests/live.sh` for a one-word reply in a throwaway repository: $0.007 with these flags, against $0.10 and $0.13 in two runs with the old ones; the research measured $0.59 for the old ones in this repository.
 
-### 1.3 Fix the Codex launch `[ ]`
+### 1.3 Fix the Codex launch `[x]`
 
 - Change: drop `-c model_reasoning_effort=high` or expose it as an option; make the `-o` path absolute from `git rev-parse --show-toplevel`; move the ten-minute timeout from prose into the script with `perl -e 'alarm shift; exec @ARGV' 600 codex exec ...`, since macOS has no `timeout`; on timeout, resume with `codex exec -o <fresh file> resume <session id> "Reply now with your complete findings" < /dev/null` instead of restarting; tell the prompt that `.git` and the home directory are write-protected in the sandbox, so a denied cache write is not reported as a project bug.
 - Why: the user's `~/.codex/config.toml` sets `xhigh`, so `high` lowers the reviewer below the README's promise of the harness default; `workspace-write` denies `.git`, `~/.cache` and the network. **Verified** in the config reference and by a sandbox probe.
 - Check: the reviewer log shows the configured effort; a forced timeout resumes and still produces findings.
+- Done on 8 October 2026, corrected. The `perl alarm; exec` recipe would stop only the Superset `codex` wrapper, which runs the real binary as a child, so the script runs the reviewer in a process group of its own and stops the whole group. The deadline is 480 seconds plus one resume of at most 90 seconds at `medium` effort, inside the builder's 10-minute command limit; `-s` has to come before `resume`. The `-o` path is absolute, taken from the repository root. Meanwhile the user's default moved to `gpt-6.1-sol` at `ultra`, so the old override had sat further below it.
 
 ### 1.4 Evaluate `codex exec review` for round one `[ ]`
+
+Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 0.160.1 with "unexpected argument '-s' found". The sandbox flag goes before the subcommand, `codex exec -s workspace-write review ...`; whether the review thread honours it is untested.
 
 - Change: run round one as `codex exec review -s workspace-write -o out.md "<prompt>" < /dev/null`, mapping P0 and P1 to must-fix and P2 and P3 to a "mentioned, not fixed" tail. Keep plain `codex exec` for design reviews: `exec review` has no `--image` and rejects `--worktree`.
 - Why: a custom prompt replaces only the user message, so Codex's rubric comes for free: a confidence score per finding, "the author would fix it", "pre-existing bugs should not be flagged", "provably affected". **Verified** flags and rubric text; the mapping of P-levels is **Inference**.
@@ -46,11 +53,12 @@ Nothing below changes the design. A reviewer from the other vendor, must-fix fin
 
 ## Phase 2: loop rules, prompt and ledger
 
-### 2.1 Hard round cap, named exit, verify-only first `[ ]`
+### 2.1 Hard round cap, named exit, verify-only first `[x]`
 
 - Change: in `skills/review-loop/SKILL.md`, cap the loop at three review-fix rounds. Rounds two and three first verify the previous fixes, then look for new must-fix items. The final summary names the exit that fired: clean, count rose, second plateau, diff budget, or round cap.
 - Why: gains concentrate in rounds one and two; a second review round added 62% more false positives for little recall; a budget exit looks identical to convergence unless it is named. **Inference** from arXiv 2603.16244 and 2604.10508 and from practitioner caps of two to five rounds.
 - Check: the summary of a real loop states its exit; a loop with a large round one ends by round three.
+- Done on 8 October 2026, without the second sentence of the change: later rounds already checked only the previous fixes, and "then look for new must-fix items" would have reopened the full review. Under a cap of three, the plateau rule could no longer end the loop before the cap did, so it was folded in: round 2 continues unless the accepted count rose, and round 3 is the last. The exits are clean, count rose, round cap, diff budget, reviewer failed and reviewer changed the work. A caveat on the evidence: the 62% rise in false positives compares multi-turn review with fresh single-pass review, and every round here already runs a fresh reviewer.
 
 ### 2.2 Rubric tests, confidence field and verdict line `[ ]`
 
@@ -75,6 +83,7 @@ Nothing below changes the design. A reviewer from the other vendor, must-fix fin
 - Change: `.local/decisions.md` records every finding with an identity by behaviour and cause, a status of `open`, `fixed`, `rejected`, `deferred`, `settled` or `disputed`, the round it came from and the fix that resolved it. Dismissals carry one reason code: `wrong`, `not worth fixing`, `already handled`, `style` or `duplicate`. Choices are written as a ruling with the what, the why and the cost if wrong. The reviewer adds a "Declined to judge" list of behaviours it set aside. Rounds two and three receive the previous findings verbatim with their dispositions.
 - Why: practitioner ledgers converged on this shape, and fleet data showed 44% of later findings landing in code the previous fix changed. **Inference**.
 - Check: a reworded re-raise matches an existing entry; the final report separates reviewer errors from the other dismissal reasons.
+- Caution: passing the previous findings verbatim moves later rounds towards the multi-turn context that the 62% figure in 2.1 measured against, so log whether it raises the false positives.
 
 ### 2.6 Protect the tests in fix rounds `[ ]`
 
@@ -110,11 +119,12 @@ Nothing below changes the design. A reviewer from the other vendor, must-fix fin
 
 ## Phase 4: skill hygiene, installer and distribution
 
-### 4.1 Make `ship` explicit-only `[ ]`
+### 4.1 Make `ship` explicit-only `[x]`
 
 - Change: add `disable-model-invocation: true` to `skills/ship/SKILL.md`; add `skills/ship/agents/openai.yaml` with `policy: allow_implicit_invocation: false`; optionally a PreToolUse hook that denies a force-push to the default branch. Note in the README that this departs from OpenAI's advice not to infer explicit-only invocation from sensitivity.
 - Why: both mechanisms are documented, and Codex's bundled `review-agent` skill uses the same policy. **Verified**.
 - Check: `claude -p "ship this"` does not load the skill while `/ship` does; in Codex, `$ship` works and the skill is absent from the implicit list.
+- Done on 8 October 2026, without the hook. `tests/live.sh` checks a renamed probe copy in both harnesses: a request to ship doesn't load it, and calling it by name does. The instruction block tells the agent to ask for `/ship` or `$ship` when the user asks to ship in other words.
 
 ### 4.2 Relative script paths and no cross-skill dependency `[ ]`
 
@@ -128,11 +138,12 @@ Nothing below changes the design. A reviewer from the other vendor, must-fix fin
 - Why: Codex still scans `~/.codex/skills`, so a same-name skill there shadows the installed one, and the validators disagree on allowed keys. **Verified** by probe and docs.
 - Check: a duplicate in `~/.codex/skills` produces a warning; all validators pass.
 
-### 4.4 Give this repository the checks it asks of others `[ ]`
+### 4.4 Give this repository the checks it asks of others `[x]`
 
 - Change: add an `AGENTS.md` with the checks: `bash -n` and `shellcheck` on the scripts, the validators from 4.3, and a smoke test that runs `reviewer.sh` against a fixture repository.
 - Why: the skills take "the project's checks" from `AGENTS.md`, and this repository has none, so its own review loops run unchecked.
 - Check: the review loop on this repository runs the checks.
+- Done on 8 October 2026, first rather than last, so that every later change runs the checks, and split in two. `tests/check.sh` is free and offline: syntax, `shellcheck`, `claude plugin validate skills`, and tests of `reviewer.sh` and `state.sh` against stub CLIs. `tests/live.sh` runs the real reviewers and costs about ten launches, so it is run by hand: the loop runs the checks several times per round. Codex's `quick_validate.py` needs PyYAML, which isn't installed, so it isn't run yet.
 
 ### 4.5 A second install path `[ ]`
 

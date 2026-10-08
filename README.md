@@ -66,6 +66,8 @@ On Windows the installer puts a second marked copy of each skill in `~/.claude/s
 
 `screenshot.sh` finds Chrome, or Edge where Chrome isn't installed, and runs it on a throwaway profile. Headless Chrome and Edge on Windows won't lay a page out narrower than about 500 px, so the 390 px phone shot is the left part of a wider layout; the script says so when it happens. The plan's move to Playwright (3.1) would fix that.
 
+The skills tell the agent to run their helper scripts on Windows as `bash ~/.agents/skills/...`, which works from Git Bash and from PowerShell, and tell Claude Code to use its Bash tool for them. Codex runs every command in PowerShell, so there `bash` has to be Git's: `(Get-Command bash).Source` should be under `C:\Program Files\Git`. If it finds nothing, or finds WSL's `C:\Windows\System32\bash.exe`, put `C:\Program Files\Git\bin` ahead of it on `PATH`. A default Git for Windows install puts only `Git\cmd` on `PATH`, which has no `bash.exe`.
+
 ## What a project needs
 
 - An `AGENTS.md` that says how to run its checks, such as tests and a typecheck. The skills refer to "the project's checks" and look there. Claude Code reads a project `AGENTS.md` natively since version 2.1.277 when there is no `CLAUDE.md`; a `CLAUDE.md` containing `@AGENTS.md` still works.
@@ -85,4 +87,4 @@ The reviewer runs on each harness's own default model, as set in `~/.codex/confi
 
 ## Adding a skill
 
-Add a folder under `skills/` with a `SKILL.md` that starts with `name` and `description` front matter, and reinstall. Refer to helper scripts by their installed path, `~/.agents/skills/<name>/...`, until the plan's move to relative paths is done.
+Add a folder under `skills/` with a `SKILL.md` that starts with `name` and `description` front matter, and reinstall. Refer to helper scripts by their installed path, `~/.agents/skills/<name>/...`, until the plan's move to relative paths is done. On Windows the agent has to run them through `bash`; say so the way the review skills do.

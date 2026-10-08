@@ -5,6 +5,8 @@ description: Get the look and layout of a page you changed reviewed by the other
 
 Have the other coding agent review the page you changed, from screenshots. This is one round, with no loop: the user is the final judge of a design. The reviewer is Codex if you are Claude Code, and Claude Code if you are Codex.
 
+On Windows, run this skill's scripts with `bash` in front, as in `bash ~/.agents/skills/review-design/screenshot.sh ...`, which works from Git Bash and from PowerShell. If you are Claude Code, run them with the Bash tool. There the script can't lay a page out narrower than about 500 px, so `phone.png` would show the left part of a wider layout: take that one with your own browser tools if you can, and otherwise say so in `.local/design-context.md`.
+
 1. Start the app the way `AGENTS.md` says, in the background, and make sure it shows realistic data. In a Superset workspace, `./.superset/run.sh` starts it on the workspace's own port.
 2. Take screenshots into `.local/design/`:
 

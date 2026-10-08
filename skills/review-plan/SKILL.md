@@ -5,6 +5,8 @@ description: Get your plan for a task reviewed by the other coding agent before 
 
 Have the other coding agent review your plan before any code is written. This is one round, with no loop: the user is the final judge of a plan. The reviewer is Codex if you are Claude Code, and Claude Code if you are Codex.
 
+On Windows, run the reviewer script below with `bash` in front, as in `bash ~/.agents/skills/review-loop/reviewer.sh ...`, which works from Git Bash and from PowerShell. If you are Claude Code, run it with the Bash tool.
+
 1. Write the plan to `.local/plan.md`. Start it with the user's request, word for word. Then give what you will build, the files you expect to touch, the choices the user has to make with your recommendation for each, and how you will check the result.
 2. Run the reviewer from the repository root, in the foreground with a 10-minute timeout. Pass `codex` if you are Claude Code and `claude` if you are Codex:
 

@@ -7,6 +7,8 @@ Run a build-and-review loop on the uncommitted work in this checkout, without as
 
 The user asking for this skill is permission to commit when the loop ends clean, even if the task said earlier not to commit. It is never permission to push.
 
+On Windows, run this skill's scripts with `bash` in front, as in `bash ~/.agents/skills/review-loop/state.sh`, which works from Git Bash and from PowerShell. If you are Claude Code, run them with the Bash tool.
+
 ## Before the first round
 
 1. Run the project's checks (see `AGENTS.md`) and fix any failure.

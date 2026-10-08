@@ -23,11 +23,16 @@ while IFS= read -r -d '' file; do
   [ -f "$file" ] && untracked=$(( untracked + $(wc -l < "$file") ))
 done < <(git ls-files --others --exclude-standard -z)
 
+# Git Bash puts shasum, a Perl script, on PATH only in a login shell, so a plain
+# `bash state.sh` from PowerShell can't find it. sha1sum prints the same lines.
+sha=shasum
+command -v shasum > /dev/null 2>&1 || sha=sha1sum
+
 fingerprint="$(
   {
     git diff HEAD
-    git ls-files --others --exclude-standard -z | xargs -0 shasum 2>/dev/null || true
-  } | shasum | cut -d' ' -f1
+    git ls-files --others --exclude-standard -z | xargs -0 "$sha" 2>/dev/null || true
+  } | "$sha" | cut -d' ' -f1
 )"
 
 echo "lines=$(( tracked + untracked )) fingerprint=$fingerprint"

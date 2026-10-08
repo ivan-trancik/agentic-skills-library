@@ -50,11 +50,17 @@ What lets the review loop run unsupervised:
 ./install.sh
 ```
 
-This copies each skill to `~/.agents/skills/<name>`, which Codex reads, links it from `~/.claude/skills/<name>`, which Claude Code reads, and adds the instruction block to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. Run it again after changing anything here. `./install.sh --uninstall` removes exactly what it installed.
+This copies each skill to `~/.agents/skills/<name>`, which Codex reads, links it from `~/.claude/skills/<name>`, which Claude Code reads (on Windows it copies it there; see below), and adds the instruction block to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. Run it again after changing anything here. `./install.sh --uninstall` removes exactly what it installed.
 
 Every installed copy carries a marker. The installer refuses to replace a same-name skill it didn't create, and removes only marked copies. Edit the source here and reinstall; edits made to installed copies are overwritten.
 
 Both locations are needed. Claude Code does not read `~/.agents/skills` itself but follows the symlink from `~/.claude/skills`. Codex also still reads `~/.codex/skills`, so a same-name skill there would shadow the installed one. Both were checked on the versions above.
+
+### Windows
+
+Run `./install.sh` from Git Bash, which comes with Git for Windows. Developer Mode isn't needed.
+
+On Windows the installer puts a second marked copy of each skill in `~/.claude/skills/<name>` instead of a link, because Git Bash's `ln -s` makes a plain copy unless Developer Mode is on and `MSYS=winsymlinks:nativestrict` is set. Reinstalling replaces the copies, `--uninstall` removes them, and a same-name folder without the marker is left alone. If another program holds a file in a copy open, the installer leaves that copy whole and says what to close. It also warns when bash's `HOME` isn't the Windows user folder, which is where both agents look.
 
 ## What a project needs
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# The checks for this repository: syntax and lint for every script, Claude
-# Code's skill validator, and tests that run reviewer.sh and state.sh against
-# the stub codex and claude commands in tests/stubs. Free and offline: no
-# model is called.
+# The checks for this repository: syntax, lint and permissions for every
+# script, Claude Code's skill validator, tests that run reviewer.sh and
+# state.sh against the stub codex and claude commands in tests/stubs, and
+# tests of install.sh against a fake home. Free and offline: no model is
+# called, and it runs inside Codex's sandbox.
 #
 #   tests/check.sh
 set -euo pipefail
@@ -10,10 +11,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 here="$PWD"
 
-scripts=(install.sh skills/*/*.sh tests/*.sh tests/stubs/*)
-for script in "${scripts[@]}"; do bash -n "$script"; done
+fail() { echo "FAIL - $*" >&2; exit 1; }
+
+# Symlinked copies of a script are checked once, at their source.
+scripts=(install.sh tests/*.sh tests/stubs/*)
+while IFS= read -r -d '' script; do scripts+=("$script"); done < <(find skills -type f -name '*.sh' -print0)
+for script in "${scripts[@]}"; do
+  bash -n "$script"
+  [ -x "$script" ] || fail "$script is not executable"
+done
 shellcheck "${scripts[@]}"
-echo "ok - syntax and shellcheck"
+while IFS= read -r -d '' link; do
+  [ -e "$link" ] || fail "$link points at nothing"
+done < <(find skills -type l -print0)
+echo "ok - syntax, shellcheck, permissions and links"
 
 # Unset, the Superset wrapper doesn't report this run as the workspace's agent.
 if ! validation="$(env -u SUPERSET_TERMINAL_ID -u SUPERSET_TAB_ID -u SUPERSET_PANE_ID \
@@ -43,13 +54,11 @@ EOF
 export STUB_RECORD="$tmp/calls" HOME="$tmp/home"
 unset CLAUDE_CONFIG_DIR REVIEWER_EFFORT REVIEWER_TIMEOUT
 
-fail() { echo "FAIL - $*" >&2; exit 1; }
-
 # Runs reviewer.sh in the test repository with the stubs first on PATH.
 review() {
   rm -rf "$STUB_RECORD"
   mkdir -p "$STUB_RECORD"
-  (cd "$repo" && PATH="$here/tests/stubs:$PATH" "$here/skills/review-loop/reviewer.sh" "$@")
+  (cd "$repo" && PATH="$here/tests/stubs:$PATH" "$here/skills/review-loop/scripts/reviewer.sh" "$@")
 }
 
 # has <call> <argument>...: the recorded call has these arguments, in this order, in a row.
@@ -138,7 +147,7 @@ for bad in soon 0 -5 1.5; do
 done
 echo "ok - empty replies and usage errors"
 
-state() { (cd "$repo" && "$here/skills/review-loop/state.sh"); }
+state() { (cd "$repo" && "$here/skills/review-loop/scripts/state.sh"); }
 before="$(state)"
 echo 'print(2)' >> "$repo/app.py"
 edited="$(state)"
@@ -151,5 +160,51 @@ echo 'scratch' > "$repo/.local/scratch.txt"
   || fail "state.sh fingerprint misses a change"
 [ "$(state)" = "$added" ] || fail "state.sh counts files in .local/"
 echo "ok - state.sh"
+
+# install.sh, run from a copy of this repository with its own commit, against a fake home.
+copy="$tmp/copy"
+home="$tmp/install-home"
+mkdir -p "$copy/research" "$home"
+cp -R "$here/install.sh" "$here/skills" "$here/instructions" "$copy/"
+printf 'claude 2.1.294\ncodex 0.160.1\n' > "$copy/research/verified-versions"
+git -C "$copy" init -q
+git -C "$copy" add -A
+git -C "$copy" -c user.name=test -c user.email=test@example.com commit -qm copy
+installer() { HOME="$home" PATH="$here/tests/stubs:$PATH" "$copy/install.sh" "$@"; }
+installed="$home/.agents/skills"
+
+installer > /dev/null 2>&1 || fail "install"
+[ -f "$installed/review-plan/scripts/reviewer.sh" ] && [ ! -L "$installed/review-plan/scripts/reviewer.sh" ] \
+  || fail "the shared runner is not installed as a file of its own"
+cmp -s "$installed/review-plan/scripts/reviewer.sh" "$here/skills/review-loop/scripts/reviewer.sh" \
+  || fail "the installed runner differs from its source"
+grep -qF "managed copy of $(git -C "$copy" rev-parse --short HEAD)" "$installed/ship/SKILL.md" \
+  || fail "the marker doesn't name the commit"
+[ "$(readlink "$home/.claude/skills/ship")" = "$installed/ship" ] || fail "no Claude Code link"
+grep -qF 'agentic-skills-library:start' "$home/.codex/AGENTS.md" || fail "no instruction block"
+installer --check > "$tmp/check.out" 2>&1 || fail "--check right after install: $(cat "$tmp/check.out")"
+[ "$(grep -c ': current$' "$tmp/check.out")" = 8 ] || fail "--check doesn't report all six skills and both blocks current"
+if grep -q '^note:' "$tmp/check.out"; then fail "--check notes a version that matches"; fi
+STUB_CODEX_VERSION=0.999.0 installer --check > "$tmp/check.out" 2>&1 || true
+grep -q '^note: codex is 0.999.0, but the skills were last verified on 0.160.1' "$tmp/check.out" \
+  || fail "--check doesn't note a new Codex version"
+
+echo 'edited' >> "$installed/review-loop/reviewer-prompt.md"
+chmod -x "$installed/review-plan/scripts/reviewer.sh"
+rm -rf "$installed/save-review"
+mkdir -p "$home/.codex/skills/ship"
+if installer --check > "$tmp/check.out" 2>&1; then fail "--check passes a changed install"; fi
+grep -qx 'review-loop: changed' "$tmp/check.out" || fail "--check misses a changed file"
+grep -qx 'review-plan: changed' "$tmp/check.out" || fail "--check misses a script that lost its execute bit"
+grep -qx 'save-review: missing' "$tmp/check.out" || fail "--check misses a missing skill"
+grep -q 'warning: .*/.codex/skills/ship also exists' "$tmp/check.out" || fail "no warning for a shadowing skill"
+
+installer > /dev/null 2>&1 || fail "reinstall"
+installer --check > /dev/null 2>&1 || fail "reinstall doesn't restore the copies"
+installer --uninstall > /dev/null 2>&1
+[ ! -e "$installed/ship" ] && [ ! -e "$home/.claude/skills/ship" ] || fail "uninstall leaves a skill"
+if grep -qF 'agentic-skills-library:start' "$home/.claude/CLAUDE.md"; then fail "uninstall leaves the block"; fi
+[ -d "$home/.codex/skills/ship" ] || fail "uninstall removed a skill it doesn't own"
+echo "ok - install.sh"
 
 echo "all checks passed"

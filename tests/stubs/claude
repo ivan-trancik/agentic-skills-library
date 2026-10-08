@@ -6,7 +6,10 @@
 #   STUB_REPLY   the result text
 #   STUB_ERROR   when set, the run reports an error instead of a result
 #   STUB_SLEEP   seconds to wait first, in a child process
+#   STUB_CLAUDE_VERSION  what --version reports
 set -euo pipefail
+
+if [ "${1:-}" = --version ]; then echo "${STUB_CLAUDE_VERSION:-2.1.294} (Claude Code)"; exit 0; fi
 
 n=1
 while [ -e "$STUB_RECORD/claude.$n" ]; do n=$((n + 1)); done

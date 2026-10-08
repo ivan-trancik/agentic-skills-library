@@ -125,18 +125,21 @@ Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 
 - Why: both mechanisms are documented, and Codex's bundled `review-agent` skill uses the same policy. **Verified**.
 - Check: `claude -p "ship this"` does not load the skill while `/ship` does; in Codex, `$ship` works and the skill is absent from the implicit list.
 - Done on 8 October 2026, without the hook. `tests/live.sh` checks a renamed probe copy in both harnesses: a request to ship doesn't load it, and calling it by name does. The instruction block tells the agent to ask for `/ship` or `$ship` when the user asks to ship in other words.
+- The optional force-push hook was left out by the user's decision on 8 October 2026: `ship` never forces a push, and a global hook would change every project's settings.
 
-### 4.2 Relative script paths and no cross-skill dependency `[ ]`
+### 4.2 Relative script paths and no cross-skill dependency `[x]`
 
 - Change: move helpers under `scripts/` and refer to them relative to the skill root, using `${CLAUDE_SKILL_DIR}` in Claude Code. Give `review-plan` and `review-design` their own copy of the runner, or a shared runner skill they call by name. Add `metadata` with a version and source to each `SKILL.md`.
 - Why: the Agent Skills specification and both vendors say relative paths; the hard-coded `~/.agents/skills/...` breaks project-scope installs and plugin packaging. **Verified** guidance; the breakage is **Inference**.
 - Check: install the skills into a project's `.agents/skills` folder and run a review from there.
+- Done on 8 October 2026 with one source for the runner: `review-plan` and `review-design` hold symlinks to `review-loop/scripts/reviewer.sh`, and `install.sh` copies with `cp -RL`, so each installed skill holds a file of its own. Each `SKILL.md` names its scripts as `${CLAUDE_SKILL_DIR}/scripts/<name>`, after a line that tells Codex what that stands for. `tests/live.sh` checks, with a probe skill installed in a project's `.agents/skills` and `.claude/skills`, that both harnesses run a script named that way. Not done: `metadata` with a version and source, because the installer's marker records the commit and a hand-bumped version would drift.
 
-### 4.3 Installer checks and validators `[ ]`
+### 4.3 Installer checks and validators `[x]`
 
 - Change: add `install.sh --check` to compare installed copies with the repository; warn when `~/.codex/skills/<name>` exists; record the source commit in the marker; run `skills-ref validate`, `claude plugin validate` and Codex's `quick_validate.py` from a check script. Avoid the `compatibility` key while Codex's validator rejects it.
 - Why: Codex still scans `~/.codex/skills`, so a same-name skill there shadows the installed one, and the validators disagree on allowed keys. **Verified** by probe and docs.
 - Check: a duplicate in `~/.codex/skills` produces a warning; all validators pass.
+- Done on 8 October 2026. The marker names the commit. `install.sh --check` reports each installed skill and instruction block as current, changed or missing, and notes a CLI version that differs from `research/verified-versions`; install and `--check` warn about a same-named skill in `~/.codex/skills`. `tests/check.sh` tests all of it against a fake home. The validators run from `tests/validate.sh` through `uv`, pinned at `skills-ref` 0.1.1 and `pyyaml` 6.0.3, on copies without `disable-model-invocation`, which both reject although Codex's runtime accepts it. They need a download on first use and can't run inside Codex's sandbox, where `uv` can't open its cache, so they stay out of `tests/check.sh`.
 
 ### 4.4 Give this repository the checks it asks of others `[x]`
 
@@ -145,11 +148,12 @@ Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 
 - Check: the review loop on this repository runs the checks.
 - Done on 8 October 2026, first rather than last, so that every later change runs the checks, and split in two. `tests/check.sh` is free and offline: syntax, `shellcheck`, `claude plugin validate skills`, and tests of `reviewer.sh` and `state.sh` against stub CLIs. `tests/live.sh` runs the real reviewers and costs about ten launches, so it is run by hand: the loop runs the checks several times per round. Codex's `quick_validate.py` needs PyYAML, which isn't installed, so it isn't run yet.
 
-### 4.5 A second install path `[ ]`
+### 4.5 A second install path `[-]`
 
 - Change: when the repository is public, keep the `skills/<name>/SKILL.md` layout so `npx skills add <owner>/agentic-skills-library` works, and optionally add plugin manifests for both harnesses. On the Claude side the instruction block can become an `@~/.agents/instructions/how-to-work-on-a-task.md` import; Codex keeps the verbatim copy, since it has no import syntax.
 - Why: the Vercel `skills` CLI uses the same canonical `.agents/skills` plus symlink layout as `install.sh`, and adds a lockfile and an update check. **Verified**.
 - Check: a fresh machine installs by either path and both harnesses list the skills.
+- Dropped on 8 October 2026 by the user's decision: the repository stays private and `install.sh` is the install path. The `skills/<name>/SKILL.md` layout already suits `npx skills add` if it is published later.
 
 ## Phase 5: instrumentation and cadence
 
@@ -159,10 +163,11 @@ Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 
 - Why: the same class of tool lands anywhere between 7% and 75% acceptance depending on policy, and no controlled study of Claude reviewing Codex or the reverse on real repositories exists. **Inference**.
 - Check: after ten loops the logs answer how many rounds ran, how much was accepted, and how often the cap fired.
 
-### 5.2 Research cadence `[ ]`
+### 5.2 Research cadence `[x]`
 
 - Change: run a cycle as described in `research/README.md` each quarter, or when either CLI changes its minor version. Consider a `research-cycle` skill that scaffolds the folder and the thread prompts.
 - Check: the cycles table in `research/README.md` grows.
+- Done on 8 October 2026: `research/README.md` sets a quarterly cycle, `tests/live.sh` records the CLI versions it passed on, and `install.sh --check` says when the installed CLIs have moved past them. No `research-cycle` skill, so the library stays at six skills.
 
 ## Not planned, and why
 

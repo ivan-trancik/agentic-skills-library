@@ -6,7 +6,10 @@
 #   STUB_REPLY   the reply written to the -o file; empty means none
 #   STUB_SLEEP   seconds to wait before replying, in a child process, the way
 #                the Superset wrapper runs the real binary
+#   STUB_CODEX_VERSION  what --version reports
 set -euo pipefail
+
+if [ "${1:-}" = --version ]; then echo "codex-cli ${STUB_CODEX_VERSION:-0.160.1}"; exit 0; fi
 
 n=1
 while [ -e "$STUB_RECORD/codex.$n" ]; do n=$((n + 1)); done

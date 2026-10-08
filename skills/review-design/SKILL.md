@@ -5,13 +5,15 @@ description: Get the look and layout of a page you changed reviewed by the other
 
 Have the other coding agent review the page you changed, from screenshots. This is one round, with no loop: the user is the final judge of a design. The reviewer is Codex if you are Claude Code, and Claude Code if you are Codex.
 
+`${CLAUDE_SKILL_DIR}` in the commands below stands for this skill's folder, the one that holds this file.
+
 1. Start the app the way `AGENTS.md` says, in the background, and make sure it shows realistic data. In a Superset workspace, `./.superset/run.sh` starts it on the workspace's own port.
 2. Take screenshots into `.local/design/`:
 
    ```
-   ~/.agents/skills/review-design/screenshot.sh <url> .local/design/desktop.png 1440 900
-   ~/.agents/skills/review-design/screenshot.sh <url> .local/design/desktop-full.png 1440 4000
-   ~/.agents/skills/review-design/screenshot.sh <url> .local/design/phone.png 390 844
+   ${CLAUDE_SKILL_DIR}/scripts/screenshot.sh <url> .local/design/desktop.png 1440 900
+   ${CLAUDE_SKILL_DIR}/scripts/screenshot.sh <url> .local/design/desktop-full.png 1440 4000
+   ${CLAUDE_SKILL_DIR}/scripts/screenshot.sh <url> .local/design/phone.png 390 844
    ```
 
    Add one for each state the task is about, such as an opened row or an empty page. The script can't click, so use your own browser tools for those.
@@ -19,7 +21,7 @@ Have the other coding agent review the page you changed, from screenshots. This 
 4. Run the reviewer from the repository root, in the foreground with a 10-minute timeout, passing every screenshot. The script keeps the reviewer read-only and stops it if it runs past eight minutes. Pass `codex` if you are Claude Code and `claude` if you are Codex:
 
    ```
-   ~/.agents/skills/review-loop/reviewer.sh <codex|claude> ~/.agents/skills/review-design/reviewer-prompt.md .local/design-review.md .local/design/desktop.png .local/design/desktop-full.png .local/design/phone.png
+   ${CLAUDE_SKILL_DIR}/scripts/reviewer.sh <codex|claude> ${CLAUDE_SKILL_DIR}/reviewer-prompt.md .local/design-review.md .local/design/desktop.png .local/design/desktop-full.png .local/design/phone.png
    ```
 
    If the reviewer can't run or writes nothing, tell the user and show them the screenshots unreviewed.

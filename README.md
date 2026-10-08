@@ -21,7 +21,7 @@ The first [research cycle](research/README.md), in October 2026, compared the li
 - `ship` starts only when the user calls it by name.
 - This repository has an `AGENTS.md` and checks of its own.
 
-Still open from the plan: the full-page screenshot is downscaled by the vision model until its text is unreadable; helper scripts are referenced by their installed path rather than relative to the skill; and the reviewer's prompt and finding format are not yet calibrated against the CLIs' own review rubrics.
+Since then, each skill names its scripts relative to its own folder, and `./install.sh --check` reports whether the installed copies match this repository. Still open from the plan: the full-page screenshot is downscaled by the vision model until its text is unreadable, and the reviewer's prompt and finding format are not yet calibrated against the CLIs' own review rubrics.
 
 ## The skills
 
@@ -49,11 +49,11 @@ What lets the review loop run unsupervised:
 ./install.sh
 ```
 
-This copies each skill to `~/.agents/skills/<name>`, which Codex reads, links it from `~/.claude/skills/<name>`, which Claude Code reads, and adds the instruction block to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. Run it again after changing anything here. `./install.sh --uninstall` removes exactly what it installed.
+This copies each skill to `~/.agents/skills/<name>`, which Codex reads, links it from `~/.claude/skills/<name>`, which Claude Code reads, and adds the instruction block to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. Run it again after changing anything here. `./install.sh --check` reports each installed skill and instruction block as current, changed or missing, and notes when a CLI differs from the version `tests/live.sh` last passed on. `./install.sh --uninstall` removes exactly what it installed.
 
-Every installed copy carries a marker. The installer refuses to replace a same-name skill it didn't create, and removes only marked copies. Edit the source here and reinstall; edits made to installed copies are overwritten.
+Every installed copy carries a marker that names the commit it came from. The installer refuses to replace a same-name skill it didn't create, and removes only marked copies. Edit the source here and reinstall; edits made to installed copies are overwritten. A script that several skills use, such as the reviewer runner, is a symlink here and becomes a file of its own in each installed copy.
 
-Both locations are needed. Claude Code does not read `~/.agents/skills` itself but follows the symlink from `~/.claude/skills`. Codex also still reads `~/.codex/skills`, so a same-name skill there would shadow the installed one. Both were checked on the versions above.
+Both locations are needed. Claude Code does not read `~/.agents/skills` itself but follows the symlink from `~/.claude/skills`. Codex also still reads `~/.codex/skills`, so a same-name skill there would shadow the installed one; the installer warns when it finds one. Both were checked on the versions above.
 
 ## What a project needs
 
@@ -64,7 +64,7 @@ Working files go in `.local/` in the project. The scripts add `.local/` to the r
 
 ## How the reviewer is run
 
-`skills/review-loop/reviewer.sh` runs the other agent from the command line: `codex exec` when Claude Code is the builder, `claude -p` when Codex is.
+`skills/review-loop/scripts/reviewer.sh` runs the other agent from the command line: `codex exec` when Claude Code is the builder, `claude -p` when Codex is.
 
 - Plan and design reviews are read-only. Codex runs in its `read-only` sandbox, and Claude gets only the `Read`, `Grep` and `Glob` tools.
 - Code reviews pass `--run-checks`. Claude then also gets the shell, in `dontAsk` mode: it may run read-only commands and the exact check commands the builder listed in `.local/review-checks`, and every other command is denied. Codex runs in its `workspace-write` sandbox, which test suites need for their caches but which also lets it edit files, and it may keep scratch files in `.local/scratch/`. The checks themselves can write too, which is why the builder compares a fingerprint of the work before and after each review.
@@ -78,4 +78,4 @@ Working files go in `.local/` in the project. The scripts add `.local/` to the r
 
 ## Adding a skill
 
-Add a folder under `skills/` with a `SKILL.md` that starts with `name` and `description` front matter, run `tests/check.sh`, and reinstall. Refer to helper scripts by their installed path, `~/.agents/skills/<name>/...`, until the plan's move to relative paths is done.
+Add a folder under `skills/` with a `SKILL.md` that starts with `name` and `description` front matter. Put its scripts in `scripts/` and name them as `${CLAUDE_SKILL_DIR}/scripts/<name>`, after the line the other skills use to tell Codex what that stands for; a script another skill already has is a symlink to it. Run `tests/check.sh` and `tests/validate.sh`, and reinstall.

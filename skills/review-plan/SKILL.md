@@ -5,11 +5,13 @@ description: Get your plan for a task reviewed by the other coding agent before 
 
 Have the other coding agent review your plan before any code is written. This is one round, with no loop: the user is the final judge of a plan. The reviewer is Codex if you are Claude Code, and Claude Code if you are Codex.
 
+`${CLAUDE_SKILL_DIR}` in the commands below stands for this skill's folder, the one that holds this file.
+
 1. Write the plan to `.local/plan.md`. Start it with the user's request, word for word. Then give what you will build, the files you expect to touch, the choices the user has to make with your recommendation for each, and how you will check the result.
 2. Run the reviewer from the repository root, in the foreground with a 10-minute timeout. The script keeps the reviewer read-only and stops it if it runs past eight minutes. Pass `codex` if you are Claude Code and `claude` if you are Codex:
 
    ```
-   ~/.agents/skills/review-loop/reviewer.sh <codex|claude> ~/.agents/skills/review-plan/reviewer-prompt.md .local/plan-review.md
+   ${CLAUDE_SKILL_DIR}/scripts/reviewer.sh <codex|claude> ${CLAUDE_SKILL_DIR}/reviewer-prompt.md .local/plan-review.md
    ```
 
    If the reviewer can't run or writes nothing, tell the user and show them the plan unreviewed. Don't review your own plan instead.

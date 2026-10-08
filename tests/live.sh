@@ -1,19 +1,27 @@
 #!/usr/bin/env bash
-# Runs the real reviewers, and probe copies of the ship skill, against
-# throwaway repositories. It costs about ten model launches, so run it by hand
-# after changing reviewer.sh or a skill's invocation settings; tests/check.sh
-# is the routine check. Run it from outside any sandbox: both CLIs need the
-# network.
+# Runs the real reviewers, and probe skills, against throwaway repositories.
+# It costs about a dozen model launches, so run it by hand after changing
+# reviewer.sh or how a skill is invoked; tests/check.sh is the routine check.
+# Run it from outside any sandbox: both CLIs need the network. When every
+# section runs and passes, it records the CLI versions in research/verified-versions.
 #
-#   tests/live.sh
+#   tests/live.sh [section ...]
+#
+# Sections, in the order they run: claude, codex, deadline, ship, paths, cost.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 here="$PWD"
-reviewer="$here/skills/review-loop/reviewer.sh"
+reviewer="$here/skills/review-loop/scripts/reviewer.sh"
 tmp="$(mktemp -d)"
 tmp="$(cd "$tmp" && pwd -P)"
 failures=0
+selected=" $* "
+wanted() {
+  [ "$selected" = "  " ] && return 0
+  case "$selected" in *" $1 "*) return 0 ;; esac
+  return 1
+}
 
 # Unset, the Superset wrappers don't report these runs as the workspace's agent.
 unset SUPERSET_TERMINAL_ID SUPERSET_TAB_ID SUPERSET_PANE_ID REVIEWER_EFFORT REVIEWER_TIMEOUT
@@ -55,7 +63,7 @@ Reply with one line per step, saying whether it worked.
 EOF
 
 in_repo() { (cd "$repo" && "$@"); }
-fingerprint() { in_repo "$here/skills/review-loop/state.sh" | sed 's/.*fingerprint=//'; }
+fingerprint() { in_repo "$here/skills/review-loop/scripts/state.sh" | sed 's/.*fingerprint=//'; }
 unchanged() { cmp -s "$repo/app.py" "$tmp/app.py"; }
 snapshot_is() { [ "$(cat "$repo/snapshot.txt")" = "$1" ]; }
 no_hook() { [ ! -e "$tmp/hook-ran" ]; }
@@ -70,6 +78,7 @@ uses_user_model() {
 }
 denied() { result_of "$1" | jq -e --arg c "$2" '[.permission_denials[]? | .tool_input.command // ""] | any(contains($c))' > /dev/null; }
 
+if wanted claude; then
 echo "Claude reviewer, read-only"
 before="$(fingerprint)"
 in_repo "$reviewer" claude "$tmp/edit-prompt.md" .local/claude-read-only.md || true
@@ -91,7 +100,9 @@ check "sed -i was denied" denied "$repo/.local/claude-checks.log" "sed"
 check "the fingerprint shows the check's change" [ "$before" != "$(fingerprint)" ]
 check "the repository's hook didn't run" no_hook
 git -C "$repo" checkout -q -- snapshot.txt
+fi
 
+if wanted codex; then
 echo "Codex reviewer, read-only"
 before="$(fingerprint)"
 in_repo "$reviewer" codex "$tmp/edit-prompt.md" .local/codex-read-only.md || true
@@ -99,7 +110,9 @@ check "it replied" replied codex-read-only.md
 check "app.py is unchanged" unchanged
 check "check.sh couldn't write" snapshot_is original
 check "the fingerprint is unchanged" [ "$before" = "$(fingerprint)" ]
+fi
 
+if wanted deadline; then
 echo "Codex reviewer, past its deadline"
 cat > "$tmp/slow-prompt.md" <<'EOF'
 This is a test of a time limit, not a review. Run the command `sleep 8` six times, one after another, waiting for each to finish. Then reply with the single word DONE.
@@ -112,7 +125,9 @@ check "the deadline fired" grep -q "passed its 20-second deadline" "$tmp/deadlin
 check "the resumed session replied" replied codex-deadline.md
 check "it finished in ${elapsed}s, under 120s" [ "$elapsed" -lt 120 ]
 check "no Codex process is left running" no_codex_left
+fi
 
+if wanted ship; then
 echo "ship skill, invoked by name only"
 probe="$tmp/ship-probe"
 mkdir -p "$probe/.agents/skills" "$probe/.claude/skills"
@@ -173,7 +188,50 @@ check "Codex's injected skill list was found" grep -q zz-visible-probe "$tmp/cod
 check "Codex didn't list it unasked" lacks zz-ship-probe "$tmp/codex-implicit-context.txt"
 check "Codex didn't use it unasked" lacks PLUM-7351 "$probe/.local/codex-implicit.md"
 check "Codex used it as \$zz-ship-probe" grep -q PLUM-7351 "$probe/.local/codex-explicit.md"
+fi
 
+if wanted paths; then
+echo "Scripts named through \${CLAUDE_SKILL_DIR}"
+paths="$tmp/path-probe"
+skill="$paths/.agents/skills/zz-path-probe"
+mkdir -p "$skill/scripts" "$paths/.claude/skills"
+git -C "$paths" init -q
+cat > "$skill/SKILL.md" <<'EOF'
+---
+name: zz-path-probe
+description: Runs the path probe. Use only when the user asks for the path probe by name.
+---
+
+`${CLAUDE_SKILL_DIR}` in the command below stands for this skill's folder, the one that holds this file.
+
+Run this command, then reply with exactly what it printed:
+
+```
+${CLAUDE_SKILL_DIR}/scripts/probe.sh
+```
+EOF
+cat > "$skill/scripts/probe.sh" <<'EOF'
+#!/usr/bin/env bash
+# The word depends on this file's bytes, so only running it gives the word.
+printf 'PROBE-%s\n' "$(shasum < "$0" | cut -c1-8)"
+EOF
+chmod +x "$skill/scripts/probe.sh"
+word="PROBE-$(shasum < "$skill/scripts/probe.sh" | cut -c1-8)"
+ln -s ../../.agents/skills/zz-path-probe "$paths/.claude/skills/zz-path-probe"
+git -C "$paths" add -A
+git -C "$paths" -c user.name=test -c user.email=test@example.com commit -qm init
+# shellcheck disable=SC2016 # the dollar sign is Codex's syntax for naming a skill
+echo '$zz-path-probe' > "$tmp/path-probe.md"
+(cd "$paths" && perl -e 'alarm shift; exec @ARGV' 300 claude -p "/zz-path-probe" --permission-mode dontAsk \
+  --permission-prompts none --allowedTools "Bash(*zz-path-probe/scripts/probe.sh*)" --max-budget-usd 1 \
+  --no-session-persistence --output-format json < /dev/null > "$tmp/claude-path.json" 2>&1) || true
+(cd "$paths" && "$reviewer" codex "$tmp/path-probe.md" .local/codex-path.md) || true
+result_has() { case "$(jq -r '.result // empty' "$1" 2> /dev/null)" in *"$2"*) return 0 ;; esac; return 1; }
+check "Claude Code ran the skill's script ($word)" result_has "$tmp/claude-path.json" "$word"
+check "Codex ran the skill's script ($word)" grep -qF "$word" "$paths/.local/codex-path.md"
+fi
+
+if wanted cost; then
 echo "Cost of one Claude launch"
 echo "Reply with the single word OK." > "$tmp/ok-prompt.md"
 in_repo "$reviewer" claude "$tmp/ok-prompt.md" .local/cost-new.md || true
@@ -185,10 +243,18 @@ in_repo claude -p "Reply with the single word OK." --allowedTools "Bash,Read,Gre
 old_cost="$(jq -r '(.total_cost_usd // 0) * 10000 | round / 10000' "$tmp/cost-old.json")"
 check "control: the old launch ran the repository's hook" [ -e "$tmp/hook-ran" ]
 echo "  new launch: \$$new_cost; old launch: \$$old_cost"
+fi
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failed; the throwaway repositories are in $tmp"
   exit 1
 fi
 rm -rf "$tmp"
+if [ "$selected" = "  " ]; then
+  {
+    echo "claude $(claude --version | awk '{ print $1 }')"
+    echo "codex $(codex --version | awk '{ print $NF }')"
+  } > research/verified-versions
+  echo "recorded the versions in research/verified-versions"
+fi
 echo "all live checks passed"

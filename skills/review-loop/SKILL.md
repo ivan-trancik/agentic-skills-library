@@ -7,21 +7,23 @@ Run a build-and-review loop on the uncommitted work in this checkout, without as
 
 The user asking for this skill is permission to commit when the loop ends clean, even if the task said earlier not to commit. It is never permission to push.
 
+`${CLAUDE_SKILL_DIR}` in the commands below stands for this skill's folder, the one that holds this file.
+
 ## Before the first round
 
 1. Run the project's checks (see `AGENTS.md`) and fix any failure.
 2. Create `.local/` if needed. Write `.local/review-context.md`: a few lines on what the work is meant to do and where the task is described.
 3. Write each check command you ran to `.local/review-checks`, one per line, exactly as you ran it; split a chain joined with `&&` into its commands. The reviewer may run these as written. A command with a `*` can't be allowed exactly, so put it in a script and list the script.
 4. Create `.local/decisions.md` if it doesn't exist, with two sections. "Settled choices" records what the user has already decided in this session, one line each. "Rounds" is where you log each round.
-5. Run `~/.agents/skills/review-loop/state.sh` and record its `lines` value under "Rounds" as the starting size.
+5. Run `${CLAUDE_SKILL_DIR}/scripts/state.sh` and record its `lines` value under "Rounds" as the starting size.
 
 ## Each round
 
-1. Run `~/.agents/skills/review-loop/state.sh` and note the fingerprint.
+1. Run `${CLAUDE_SKILL_DIR}/scripts/state.sh` and note the fingerprint.
 2. Run the reviewer from the repository root, replacing N with the round number. Pass `codex` if you are Claude Code and `claude` if you are Codex:
 
    ```
-   ~/.agents/skills/review-loop/reviewer.sh --run-checks <codex|claude> ~/.agents/skills/review-loop/reviewer-prompt.md .local/review-round-N.md
+   ${CLAUDE_SKILL_DIR}/scripts/reviewer.sh --run-checks <codex|claude> ${CLAUDE_SKILL_DIR}/reviewer-prompt.md .local/review-round-N.md
    ```
 
    Run it in the foreground with a 10-minute timeout and wait for it. The script stops a reviewer that runs past eight minutes, so it returns in time. If the reviewer can't run or writes no findings, stop and go to "Finish"; don't review your own work instead.

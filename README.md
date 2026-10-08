@@ -52,6 +52,8 @@ What lets the review loop run unsupervised:
 
 This copies each skill to `~/.agents/skills/<name>`, which Codex reads, links it from `~/.claude/skills/<name>`, which Claude Code reads (on Windows it copies it there; see below), and adds the instruction block to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. Run it again after changing anything here. `./install.sh --uninstall` removes exactly what it installed.
 
+`--skip <name>`, which can be repeated, leaves that skill alone, and `--no-instructions` leaves the instruction block alone, as in `./install.sh --skip ship --no-instructions`. Both work with `--uninstall` too. Neither removes what an earlier run installed. A name that doesn't match a folder in `skills/` exactly, case included, stops the run before anything is touched.
+
 Every installed copy carries a marker. The installer refuses to replace a same-name skill it didn't create, and removes only marked copies. Edit the source here and reinstall; edits made to installed copies are overwritten.
 
 Both locations are needed. Claude Code does not read `~/.agents/skills` itself but follows the symlink from `~/.claude/skills`. Codex also still reads `~/.codex/skills`, so a same-name skill there would shadow the installed one. Both were checked on the versions above.

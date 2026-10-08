@@ -6,6 +6,9 @@
 #   ./install.sh              install or update everything
 #   ./install.sh --uninstall  remove exactly what this script installed
 #
+# Both take --skip <name>, which can be repeated, to leave that skill alone,
+# and --no-instructions to leave the instruction block alone.
+#
 # Ownership: every installed copy carries a marker. Install refuses to replace
 # a same-name skill that has no marker, and uninstall removes only marked
 # copies and the marked block. Edit the source here and reinstall; edits made
@@ -124,19 +127,60 @@ uninstall_block() {
   echo "removed instruction block from $file"
 }
 
-case "${1:-install}" in
+usage() {
+  echo "usage: $0 [--uninstall] [--skip <name>]... [--no-instructions]" >&2
+  exit 2
+}
+
+# Matches the name exactly, case included, so that on a case-insensitive disk
+# --skip Ship can't pass the check and then skip nothing.
+is_skill() {
+  local dir
+  for dir in "$here"/skills/*/; do [ "$(basename "$dir")" = "$1" ] && return 0; done
+  return 1
+}
+
+action=install; skip=(); instructions=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    install) action=install ;;
+    --uninstall|uninstall) action=uninstall ;;
+    --skip)
+      [ $# -ge 2 ] || usage
+      if ! is_skill "${2%/}"; then echo "no skill named '$2' in skills/" >&2; exit 2; fi
+      skip+=("${2%/}"); shift
+      ;;
+    --no-instructions) instructions=0 ;;
+    *) usage ;;
+  esac
+  shift
+done
+
+skipped() {
+  local name
+  for name in ${skip[@]+"${skip[@]}"}; do [ "$name" = "$1" ] && return 0; done
+  return 1
+}
+
+case "$action" in
   install)
     status=0
-    for src in "$here"/skills/*/; do install_skill "${src%/}" || status=1; done
-    for file in "${instruction_files[@]}"; do install_block "$file"; done
+    for src in "$here"/skills/*/; do
+      skipped "$(basename "$src")" && continue
+      install_skill "${src%/}" || status=1
+    done
+    if [ "$instructions" = 1 ]; then
+      for file in "${instruction_files[@]}"; do install_block "$file"; done
+    fi
     exit "$status"
     ;;
-  --uninstall|uninstall)
-    for src in "$here"/skills/*/; do uninstall_skill "${src%/}"; done
-    for file in "${instruction_files[@]}"; do uninstall_block "$file"; done
-    ;;
-  *)
-    echo "usage: $0 [--uninstall]" >&2
-    exit 2
+  uninstall)
+    for src in "$here"/skills/*/; do
+      skipped "$(basename "$src")" && continue
+      uninstall_skill "${src%/}"
+    done
+    if [ "$instructions" = 1 ]; then
+      for file in "${instruction_files[@]}"; do uninstall_block "$file"; done
+    fi
     ;;
 esac

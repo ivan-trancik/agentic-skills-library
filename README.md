@@ -68,6 +68,8 @@ On Windows the installer puts a second marked copy of each skill in `~/.claude/s
 
 The skills tell the agent to run their helper scripts on Windows as `bash ~/.agents/skills/...`, which works from Git Bash and from PowerShell, and tell Claude Code to use its Bash tool for them. Codex runs every command in PowerShell, so there `bash` has to be Git's: `(Get-Command bash).Source` should be under `C:\Program Files\Git`. If it finds nothing, or finds WSL's `C:\Windows\System32\bash.exe`, put `C:\Program Files\Git\bin` ahead of it on `PATH`. A default Git for Windows install puts only `Git\cmd` on `PATH`, which has no `bash.exe`.
 
+Checked on Windows 11 with Git for Windows 2.54 and the Claude Code 2.1.293 desktop app, in a scratch home folder: install, reinstall, `--skip`, `--no-instructions` and uninstall; the helper scripts from Git Bash and from Windows PowerShell 5.1; screenshots with Chrome and with Edge. The reviewer ran only against stand-in `codex` and `claude` commands, so a real review across the two agents on Windows is not checked yet.
+
 ## What a project needs
 
 - An `AGENTS.md` that says how to run its checks, such as tests and a typecheck. The skills refer to "the project's checks" and look there. Claude Code reads a project `AGENTS.md` natively since version 2.1.277 when there is no `CLAUDE.md`; a `CLAUDE.md` containing `@AGENTS.md` still works.

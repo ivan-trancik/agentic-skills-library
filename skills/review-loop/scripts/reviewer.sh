@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Runs the other coding agent as a reviewer and writes its reply to a file.
 #
-#   reviewer.sh [--run-checks] <codex|claude> <prompt-file> <output-file> [image ...]
+#   reviewer.sh [--run-checks] [--schema <file>] <codex|claude> <prompt-file> <output-file> [image ...]
 #
 # Pass `codex` if you are Claude Code and `claude` if you are Codex. Relative
 # paths are taken from the repository root. The log goes next to the output
-# file, with a .log extension.
+# file, with a .log extension, and so does a record of the run, with a
+# .run.json extension: the harness, whether checks were allowed, the seconds
+# it took, when it finished, whether the deadline fired, and its cost or token counts.
+#
+# With --schema, the reviewer must reply with JSON that matches the schema in
+# that file, and the output file holds that JSON.
 #
 # Without --run-checks the reviewer is read-only, which is what plan and design
 # reviews need. With it, the reviewer may also run the project's checks, listed
@@ -18,10 +23,19 @@
 #   REVIEWER_TIMEOUT  seconds before the reviewer is stopped; default 480
 set -euo pipefail
 
-run_checks=0
-if [ "${1:-}" = "--run-checks" ]; then run_checks=1; shift; fi
+usage="usage: $0 [--run-checks] [--schema <file>] <codex|claude> <prompt-file> <output-file> [image ...]"
+run_checks=0 schema=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --run-checks) run_checks=1; shift ;;
+    --schema)
+      if [ $# -lt 2 ]; then echo "$usage" >&2; exit 2; fi
+      schema="$2"; shift 2 ;;
+    *) break ;;
+  esac
+done
 if [ $# -lt 3 ]; then
-  echo "usage: $0 [--run-checks] <codex|claude> <prompt-file> <output-file> [image ...]" >&2
+  echo "$usage" >&2
   exit 2
 fi
 agent="$1"; prompt_file="$2"; out="$3"; shift 3
@@ -45,12 +59,19 @@ absolute() { case "$1" in /*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }
 out="$(absolute "$out")"
 name="$(basename "$out")"
 log="$(dirname "$out")/${name%.*}.log"
+record="$(dirname "$out")/${name%.*}.run.json"
+if [ -n "$schema" ]; then
+  schema="$(absolute "$schema")"
+  if [ ! -f "$schema" ]; then echo "no schema at $schema" >&2; exit 2; fi
+fi
 images=()
 for image in "$@"; do images+=("$(absolute "$image")"); done
 prompt="$(cat "$prompt_file")"
 mkdir -p "$(dirname "$out")"
-rm -f "$out"
+rm -f "$out" "$record"
 : > "$log"
+# What the run record reports; the run functions fill these in as JSON values.
+deadline=false cost=null tokens=null
 
 # Stop the reviewer from reporting itself to Superset as this workspace's agent.
 unset SUPERSET_TERMINAL_ID SUPERSET_TAB_ID SUPERSET_PANE_ID
@@ -97,21 +118,29 @@ user_model_settings() {
 run_codex() {
   local sandbox=read-only status=0 session image
   if [ "$run_checks" = 1 ]; then sandbox=workspace-write; fi
-  local args=(exec -s "$sandbox" --json -o "$out")
+  local args=(exec -s "$sandbox" --json -o "$out") schema_args=()
+  if [ -n "$schema" ]; then schema_args=(--output-schema "$schema"); fi
   if [ -n "${REVIEWER_EFFORT:-}" ]; then args+=(-c "model_reasoning_effort=$REVIEWER_EFFORT"); fi
   for image in ${images[@]+"${images[@]}"}; do args+=("--image=$image"); done
-  with_deadline "$timeout" codex "${args[@]}" "$prompt" < /dev/null >> "$log" 2>&1 || status=$?
-  if [ "$status" -ne 124 ]; then return 0; fi
+  with_deadline "$timeout" codex "${args[@]}" ${schema_args[@]+"${schema_args[@]}"} "$prompt" \
+    < /dev/null >> "$log" 2>&1 || status=$?
 
-  # Out of time: resume the session once and ask for what it has.
-  echo "the reviewer passed its ${timeout}-second deadline; asking it for its findings so far" >&2
-  session="$(jq -rnR 'first(inputs | fromjson? | objects
-    | select(.type == "thread.started") | .thread_id)' "$log")"
-  if [ -z "$session" ]; then return 0; fi
-  with_deadline 90 codex exec -s "$sandbox" resume "$session" \
-    -c model_reasoning_effort=medium --json -o "$out" \
-    "Your time is up. Reply now with your complete findings so far, in the format you were asked for." \
-    < /dev/null >> "$log" 2>&1 || true
+  if [ "$status" -eq 124 ]; then
+    # Out of time: resume the session once and ask for what it has.
+    deadline=true
+    echo "the reviewer passed its ${timeout}-second deadline; asking it for its findings so far" >&2
+    session="$(jq -rnR 'first(inputs | fromjson? | objects
+      | select(.type == "thread.started") | .thread_id)' "$log")"
+    if [ -n "$session" ]; then
+      with_deadline 90 codex exec -s "$sandbox" resume "$session" \
+        -c model_reasoning_effort=medium --json -o "$out" ${schema_args[@]+"${schema_args[@]}"} \
+        "Your time is up. Reply now with your complete findings so far, in the format you were asked for." \
+        < /dev/null >> "$log" 2>&1 || true
+    fi
+  fi
+  tokens="$(jq -cnR '[inputs | fromjson? | objects | select(.type == "turn.completed") | .usage]
+    | if length == 0 then null else {input: (map(.input_tokens // 0) | add),
+      cached: (map(.cached_input_tokens // 0) | add), output: (map(.output_tokens // 0) | add)} end' "$log")"
 }
 
 run_claude() {
@@ -143,19 +172,32 @@ run_claude() {
   settings="$(user_model_settings)"
   if [ -n "$settings" ]; then args+=(--settings "$settings"); fi
   if [ -n "${REVIEWER_EFFORT:-}" ]; then args+=(--effort "$REVIEWER_EFFORT"); fi
+  if [ -n "$schema" ]; then args+=(--json-schema "$(cat "$schema")"); fi
   if [ ${#rules[@]} -gt 0 ]; then args+=(--allowedTools "${rules[@]}"); fi
 
   json="$(mktemp)"
   with_deadline "$timeout" claude "${args[@]}" < /dev/null > "$json" 2>> "$log" || status=$?
   cat "$json" >> "$log"
   if [ "$status" -eq 124 ]; then
+    deadline=true
     echo "the reviewer passed its ${timeout}-second deadline and was stopped" >&2
   elif jq -e '.is_error == false' "$json" > /dev/null 2>&1; then
-    jq -r '.result // empty' "$json" > "$out"
+    if [ -n "$schema" ]; then
+      jq '.structured_output // empty' "$json" > "$out"
+    else
+      jq -r '.result // empty' "$json" > "$out"
+    fi
   fi
+  cost="$(jq '.total_cost_usd // null' "$json" 2> /dev/null || true)"
+  cost="${cost:-null}"
+  tokens="$(jq -c '.usage // empty | {input: (.input_tokens // 0),
+    cached: ((.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)),
+    output: (.output_tokens // 0)}' "$json" 2> /dev/null || true)"
+  tokens="${tokens:-null}"
   rm -f "$json"
 }
 
+started="$(date +%s)"
 case "$agent" in
   codex) run_codex ;;
   claude) run_claude ;;
@@ -164,6 +206,12 @@ case "$agent" in
     exit 2
     ;;
 esac
+jq -n --arg harness "$agent" --argjson checks "$([ "$run_checks" = 1 ] && echo true || echo false)" \
+  --argjson seconds "$(( $(date +%s) - started ))" --argjson finished "$(date +%s)" --argjson deadline "$deadline" \
+  --argjson cost "$cost" --argjson tokens "$tokens" \
+  '{harness: $harness, checks: $checks, seconds: $seconds, finished: $finished, deadline: $deadline,
+    cost_usd: $cost, tokens: $tokens}' \
+  > "$record"
 
 if [ ! -s "$out" ]; then
   echo "the reviewer wrote nothing; see $log" >&2

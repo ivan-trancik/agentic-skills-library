@@ -21,7 +21,7 @@ The first [research cycle](research/README.md), in October 2026, compared the li
 - `ship` starts only when the user calls it by name.
 - This repository has an `AGENTS.md` and checks of its own.
 
-Since then, each skill names its scripts relative to its own folder, and `./install.sh --check` reports whether the installed copies match this repository. Still open from the plan: the full-page screenshot is downscaled by the vision model until its text is unreadable, and the reviewer's prompt and finding format are not yet calibrated against the CLIs' own review rubrics.
+Since then, each skill names its scripts relative to its own folder, and `./install.sh --check` reports whether the installed copies match this repository. The review loop now takes the CLIs' own review tests, gets its findings as JSON, has a second reviewer try to disprove them, keeps a ledger of every finding, and logs every round. Still open from the plan: the full-page screenshot is downscaled by the vision model until its text is unreadable.
 
 ## The skills
 
@@ -38,8 +38,10 @@ Since then, each skill names its scripts relative to its own folder, and `./inst
 
 What lets the review loop run unsupervised:
 
-- The reviewer reports only must-fix findings, each with a file and line, a failure scenario, and whether it was confirmed by running something or by reading the code.
-- The builder sorts each finding into real, rejected with a recorded reason, or disputed and left for the user. Rejected findings are recorded in `.local/decisions.md` so they are not raised again.
+- The reviewer reports only must-fix findings that pass the tests both CLIs' own review commands use: introduced by this change, shown to affect any other code it names, resting on no unstated assumption, and something the author would fix. Each comes as JSON, with a file and line, a failure scenario, and whether it was confirmed by running something, by reading the code, or neither.
+- A second, fresh reviewer tries to disprove every finding that wasn't confirmed by running, and the disproved ones never reach the builder.
+- The builder sorts the rest into accepted, deferred, rejected with one of five recorded reasons, or a choice it rules on. `.local/decisions.md` keeps one entry per finding, and a reworded repeat of a settled finding counts as that finding. A finding the builder still rejects after the reviewer raised it again goes to a fresh referee; only one the referee can't settle reaches the user.
+- Each round's fixes are snapshotted as git trees, so the next round sees exactly what they changed, new files included, and checks first that no test was weakened.
 - The loop runs three rounds at most. It stops sooner when the number of accepted findings rises, or when the diff has grown beyond its starting size by more than half, or by more than 200 lines where that allowance is larger. Its summary names the reason it stopped.
 - The reviewer has no tool that can edit the work. In code reviews it may run the project's checks, which can write, and the Codex reviewer's sandbox can write in the repository, so a fingerprint of the work is taken before and after each review, and a change made during a review is caught.
 
@@ -71,6 +73,18 @@ Working files go in `.local/` in the project. The scripts add `.local/` to the r
 - Claude runs with `--restricted`, which ignores every settings file, so no allow rule in a user or project file can open the shell to it; the script passes on only the user's model and effort from `~/.claude/settings.json`. `--safe-mode` also leaves out CLAUDE.md, skills, plugins, hooks and MCP servers, which cut a one-word launch in `tests/live.sh` from about $0.10 to under a cent.
 - Each reviewer runs on its harness's own model and reasoning effort, as set in `~/.codex/config.toml` and `~/.claude/settings.json`. `REVIEWER_EFFORT` overrides the effort for both.
 - `REVIEWER_TIMEOUT`, 480 seconds by default, is the reviewer's deadline. The script then stops the reviewer's whole process group, resumes a Codex reviewer once at `medium` effort for its findings so far, and stays within the builder's 10-minute command limit.
+- `--schema <file>` makes the reviewer reply with JSON that matches the schema: `--json-schema` for Claude, `--output-schema` for Codex. Every run leaves a record beside its output: the harness, the seconds it took, whether the deadline fired, and its cost or token counts.
+
+## The review log
+
+`review-loop` appends one line per round to `~/.local/state/agentic-skills-library/review-loop.jsonl`, which outlives the workspace: the repository and branch, how many findings were reported, refuted, accepted, rejected and disputed, how many lay in lines the previous fixes changed, the size of the work, the round's time and cost, and how the loop ended. For example:
+
+```bash
+log=~/.local/state/agentic-skills-library/review-loop.jsonl
+jq -s 'map(select(.exit)) | group_by(.exit) | map({exit: .[0].exit, loops: length})' "$log"   # how loops end
+jq -s '{reported: (map(.reported) | add), refuted: (map(.refuted) | add), accepted: (map(.accepted) | add)}' "$log"
+jq -s 'map(select(.round > 1)) | {later_findings: (map(.reported) | add), in_previous_fix: (map(.in_previous_fix // 0) | add)}' "$log"
+```
 
 ## Research
 

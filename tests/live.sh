@@ -7,7 +7,8 @@
 #
 #   tests/live.sh [section ...]
 #
-# Sections, in the order they run: claude, codex, deadline, ship, paths, cost.
+# Sections, in the order they run: claude, codex, deadline, ship, paths, findings,
+# refute, weakened, cost.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -69,6 +70,8 @@ snapshot_is() { [ "$(cat "$repo/snapshot.txt")" = "$1" ]; }
 no_hook() { [ ! -e "$tmp/hook-ran" ]; }
 replied() { [ -s "$repo/.local/$1" ]; }
 lacks() { ! grep -q -- "$1" "${@:2}"; }
+# json_has <jq filter> <file>: the file is JSON and the filter holds for it.
+json_has() { jq -e "$1" "$2" > /dev/null 2>&1; }
 # The brackets keep the pattern from matching a command line that contains the pattern itself.
 no_codex_left() { ! pgrep -f "test of a time [l]imit" > /dev/null; }
 
@@ -229,6 +232,78 @@ echo '$zz-path-probe' > "$tmp/path-probe.md"
 result_has() { case "$(jq -r '.result // empty' "$1" 2> /dev/null)" in *"$2"*) return 0 ;; esac; return 1; }
 check "Claude Code ran the skill's script ($word)" result_has "$tmp/claude-path.json" "$word"
 check "Codex ran the skill's script ($word)" grep -qF "$word" "$paths/.local/codex-path.md"
+fi
+
+loop="$here/skills/review-loop"
+commit_all() { git -C "$1" add -A && git -C "$1" -c user.name=test -c user.email=test@example.com commit -qm init; }
+
+# A repository whose work breaks mean(), against a task that says not to change it.
+stats="$tmp/stats"
+mkdir -p "$stats/.local"
+git -C "$stats" init -q
+printf 'def mean(values):\n    """Return the arithmetic mean of a non-empty list of numbers."""\n    return sum(values) / len(values)\n' > "$stats/stats.py"
+printf 'from stats import mean\nassert mean([2, 4]) == 3, mean([2, 4])\nprint("ok")\n' > "$stats/check_stats.py"
+commit_all "$stats"
+perl -pi -e 's{/ len\(values\)}{/ (len(values) - 1)}' "$stats/stats.py"
+echo "The work tidies stats.py. It must not change what mean() returns." > "$stats/.local/review-context.md"
+printf '# Decisions\n\n## Settled choices\n\n## Findings\n\n## Rounds\n' > "$stats/.local/decisions.md"
+echo "python3 check_stats.py" > "$stats/.local/review-checks"
+
+if wanted findings; then
+echo "Findings as JSON, from each reviewer"
+for harness in codex claude; do
+  (cd "$stats" && "$reviewer" --run-checks --schema "$loop/findings.schema.json" "$harness" \
+    "$loop/reviewer-prompt.md" ".local/findings-$harness.json" 2> /dev/null) || true
+  check "$harness reports the broken mean() as JSON" json_has \
+    '.verdict == "NEEDS_CHANGES" and (.findings | any(.file | test("stats.py")))' "$stats/.local/findings-$harness.json"
+done
+fi
+
+if wanted refute; then
+echo "The refute step"
+for harness in codex claude; do
+  cat > "$stats/.local/refute-$harness.json" <<'EOF'
+{"verdict": "NEEDS_CHANGES", "below_threshold": [], "declined": [], "findings": [
+  {"file": "stats.py", "line": 3, "summary": "mean() divides by len(values) - 1, so mean([2, 4]) returns 6, not 3",
+   "failure_scenario": "mean([2, 4]) computes 6 / 1.", "confidence": "confirmed-by-reading"},
+  {"file": "stats.py", "line": 3, "summary": "mean() sorts its argument in place, so the caller's list is reordered",
+   "failure_scenario": "mean([3, 1]) leaves the caller's list as [1, 3].", "confidence": "plausible"}]}
+EOF
+  (cd "$stats" && "$loop/scripts/refute.sh" "$harness" ".local/refute-$harness.json" > /dev/null 2>&1) || true
+  check "$harness refutes the false finding" json_has 'length == 1 and (.[0].finding.summary | test("sorts"))' \
+    "$stats/.local/refute-$harness.refuted.json"
+  check "$harness keeps the true one" json_has '[.findings[].summary] | length == 1 and (.[0] | test("divides"))' \
+    "$stats/.local/refute-$harness.kept.json"
+done
+fi
+
+if wanted weakened; then
+echo "A test weakened by a fix"
+calc="$tmp/calc"
+mkdir -p "$calc/.local"
+git -C "$calc" init -q
+printf 'def double(x):\n    return 2 * x\n' > "$calc/calc.py"
+printf 'from calc import double\n\n\ndef test_double():\n    assert double(3) == 6\n\n\nif __name__ == "__main__":\n    test_double()\n    print("ok")\n' > "$calc/test_calc.py"
+commit_all "$calc"
+perl -pi -e 's/return 2 \* x/return x * x/' "$calc/calc.py"
+before="$( (cd "$calc" && "$loop/scripts/state.sh") | sed 's/.*fingerprint=//')"
+perl -pi -e 's/assert double\(3\) == 6/assert double(3) > 0/' "$calc/test_calc.py"
+after="$( (cd "$calc" && "$loop/scripts/state.sh") | sed 's/.*fingerprint=//')"
+cat > "$calc/.local/review-context.md" <<EOF
+The work makes double() faster without changing what it returns.
+
+## Fixes to check
+
+1. test_calc.py: round 1 found that test_double failed; the test is fixed. Snapshots: before \`$before\`, after \`$after\`.
+EOF
+printf '# Decisions\n\n## Settled choices\n\n## Findings\n\n    F1 · round 1 · fixed · test_calc.py:5\n    Behaviour: test_double failed.\n    Fixed by: updating the test.\n\n## Rounds\n' > "$calc/.local/decisions.md"
+echo "python3 test_calc.py" > "$calc/.local/review-checks"
+for harness in codex claude; do
+  (cd "$calc" && "$reviewer" --run-checks --schema "$loop/findings.schema.json" "$harness" \
+    "$loop/reviewer-prompt.md" ".local/weakened-$harness.json" 2> /dev/null) || true
+  check "$harness flags the weakened test" json_has '.findings | any(.file | test("test_calc.py"))' \
+    "$calc/.local/weakened-$harness.json"
+done
 fi
 
 if wanted cost; then

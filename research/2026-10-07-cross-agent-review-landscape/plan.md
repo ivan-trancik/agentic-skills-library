@@ -60,42 +60,48 @@ Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 
 - Check: the summary of a real loop states its exit; a loop with a large round one ends by round three.
 - Done on 8 October 2026, without the second sentence of the change: later rounds already checked only the previous fixes, and "then look for new must-fix items" would have reopened the full review. Under a cap of three, the plateau rule could no longer end the loop before the cap did, so it was folded in: round 2 continues unless the accepted count rose, and round 3 is the last. The exits are clean, count rose, round cap, diff budget, reviewer failed and reviewer changed the work. A caveat on the evidence: the 62% rise in false positives compares multi-turn review with fresh single-pass review, and every round here already runs a fresh reviewer.
 
-### 2.2 Rubric tests, confidence field and verdict line `[ ]`
+### 2.2 Rubric tests, confidence field and verdict line `[x]`
 
 - Change: in `skills/review-loop/reviewer-prompt.md`, add the tests: the bug must be introduced by this change; speculation about other code counts only if that code is provably affected; no unstated assumptions about intent; report only what the author would fix if they knew, and prefer no findings otherwise; one paragraph per finding with code quotes of at most three lines, stating the inputs that trigger the failure. Add a confidence per finding, `confirmed-by-running`, `confirmed-by-reading` or `plausible`, a first line `VERDICT: PASS|NEEDS_CHANGES` with a tally, and the sentence "zero findings is a valid result".
 - Why: these are Codex's own rubric tests and Claude Code's verify vote. **Verified** text of both.
 - Check: a run on a known-clean diff returns `VERDICT: PASS` and no findings.
+- Done on 8 October 2026. The prompt carries the four tests, says that no findings is a valid result, asks for a one-paragraph failure scenario quoting at most three lines, and asks for a confidence per finding. The verdict line became the `verdict` field of 2.3's JSON; a clean round returns `PASS`.
 
-### 2.3 Structured output `[ ]`
+### 2.3 Structured output `[x]`
 
 - Change: use `claude -p --output-format json --json-schema <schema>` and `codex exec --output-schema schema.json` so `review-loop` reads a `must_fix` array mechanically and keeps sub-threshold findings in a summary without reopening them.
 - Why: both flags exist. **Verified**. Keeping sub-threshold findings visible is the pattern of Qodo and of Claude Code Review.
 - Check: `jq .must_fix` on the output file.
+- Done on 8 October 2026. `findings.schema.json` holds `verdict`, `findings`, `below_threshold` (at most five, listed in the final summary and never fixed) and `declined`. `reviewer.sh --schema` passes it as `--json-schema` to Claude and `--output-schema` to Codex, including on a resume, and every run leaves a record of its time and cost. `tests/live.sh` checks that both reviewers report a planted bug in that form.
 
-### 2.4 Refute step and referee `[ ]`
+### 2.4 Refute step and referee `[x]`
 
 - Change: after the reviewer's list, run one more reviewer turn whose only job is to refute each finding by quoting the line that disproves it, and drop refuted items before the builder sees them. Findings the builder still disputes go to a fresh third reviewer run before they reach the user.
 - Why: having a fresh model try to refute a result is Anthropic's own guidance; adversarial gates removed about 79% of candidates in one security pipeline; a finding repeated across rounds is not thereby confirmed. **Inference**.
 - Check: the log counts refuted items per round and the cost of the extra turn.
+- Done on 8 October 2026, refuting only the findings not confirmed by running, by the user's choice. `scripts/refute.sh` sends them to a fresh, read-only run with `refute-prompt.md` and splits the round into kept and refuted findings; if the refute run fails, every finding is kept. A finding the builder still rejects after the reviewer raised it again goes to a fresh run with `referee-prompt.md`, and only an `unclear` verdict reaches the user. `tests/live.sh` checks that each harness refutes a planted false finding and keeps a true one; the log counts refuted findings and adds the extra run's time and cost to the round.
 
-### 2.5 A findings ledger instead of settled choices `[ ]`
+### 2.5 A findings ledger instead of settled choices `[x]`
 
 - Change: `.local/decisions.md` records every finding with an identity by behaviour and cause, a status of `open`, `fixed`, `rejected`, `deferred`, `settled` or `disputed`, the round it came from and the fix that resolved it. Dismissals carry one reason code: `wrong`, `not worth fixing`, `already handled`, `style` or `duplicate`. Choices are written as a ruling with the what, the why and the cost if wrong. The reviewer adds a "Declined to judge" list of behaviours it set aside. Rounds two and three receive the previous findings verbatim with their dispositions.
 - Why: practitioner ledgers converged on this shape, and fleet data showed 44% of later findings landing in code the previous fix changed. **Inference**.
 - Check: a reworded re-raise matches an existing entry; the final report separates reviewer errors from the other dismissal reasons.
+- Done on 8 October 2026. `decisions.md` keeps a "Findings" ledger: one entry per finding with its round, status, file and line, behaviour and cause, and its fix or one of the five dismissal reasons; choices are rulings with the why and the cost if wrong. The reviewer treats a finding with an entry's behaviour as that entry, and its `declined` list goes into the final summary. Later rounds read the ledger rather than a separate copy of the earlier findings.
 - Caution: passing the previous findings verbatim moves later rounds towards the multi-turn context that the 62% figure in 2.1 measured against, so log whether it raises the false positives.
 
-### 2.6 Protect the tests in fix rounds `[ ]`
+### 2.6 Protect the tests in fix rounds `[x]`
 
 - Change: in later rounds the reviewer diffs the test files first; the changed-file list comes from git, never from the builder's report; optionally a WIP commit per round, squashed at the end, so each review has a stable revision.
 - Why: builders measurably weaken tests under pressure, and read-only tests stopped that without hurting honest work. **Inference**.
 - Check: weaken a test deliberately in a fixture repository; the reviewer flags it.
+- Done on 8 October 2026, with git tree snapshots in place of WIP commits. `state.sh`'s fingerprint is a tree of the whole work, untracked files included, written through a copy of the index, so history and the real index stay as they are. "Fixes to check" names the trees from before and after the fixes; the reviewer reads `git diff <before> <after>` and looks at changed tests first. A submodule's own work enters the snapshot as its own tree, so edits and symlinks inside it count, and a submodule that can't be snapshotted stops the loop rather than reading as unchanged. `tests/live.sh` checks that both reviewers flag a test a fix loosened while the checks still pass.
 
-### 2.7 Right-size the ceremony `[ ]`
+### 2.7 Right-size the ceremony `[x]`
 
 - Change: in `instructions/how-to-work-on-a-task.md`, add a sizing step: if the diff can be described in one sentence, skip the plan and the plan review; cross-review stays for everything that changes behaviour. At the end of the loop, check the diff against `.local/plan.md`.
 - Why: vendor guidance and practitioner cost complaints; planning is a cost saver rather than an accuracy gain for strong models, and a subpar plan hurts more than none, which is the argument for keeping plan review wherever a plan exists. **Vendor claim and practice**.
 - Check: a one-line fix goes straight to build and the review loop.
+- Done on 8 October 2026, by the user's choice: step 1 of the instruction block skips the plan and its review when the whole change fits in one sentence, and the loop's summary lists where the work differs from `.local/plan.md`.
 
 ## Phase 3: design review pipeline
 
@@ -157,11 +163,12 @@ Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 
 
 ## Phase 5: instrumentation and cadence
 
-### 5.1 Log every round `[ ]`
+### 5.1 Log every round `[x]`
 
 - Change: append one line per round to `.local/loop-log.jsonl`: findings reported, accepted, rejected, disputed and refuted; whether each finding lies in code the previous fix changed; the `lines` value; wall time; cost from the JSON output. Keep the logs across sessions.
 - Why: the same class of tool lands anywhere between 7% and 75% acceptance depending on policy, and no controlled study of Claude reviewing Codex or the reverse on real repositories exists. **Inference**.
 - Check: after ten loops the logs answer how many rounds ran, how much was accepted, and how often the cap fired.
+- Done on 8 October 2026. `scripts/log-round.sh` appends a line per round to `~/.local/state/agentic-skills-library/review-loop.jsonl`, outside the workspace: the counts, the findings in lines the previous fixes changed (from the snapshots' diff hunks), the size of the work, the exit, and the time, cost and tokens summed from the round's run records. The README shows `jq` lines that summarise it.
 
 ### 5.2 Research cadence `[x]`
 

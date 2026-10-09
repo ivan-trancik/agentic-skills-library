@@ -133,6 +133,30 @@ fi
 [ ! -e "$out" ] || fail "claude error written as a reply"
 echo "ok - claude reviewer, deadline and error"
 
+schema="$here/skills/review-loop/findings.schema.json"
+finding='{"verdict":"NEEDS_CHANGES","findings":[{"file":"app.py","line":1,"summary":"s","failure_scenario":"f","confidence":"plausible"}],"below_threshold":[],"declined":[]}'
+record="$repo/.local/out.run.json"
+STUB_REPLY="$finding" review --schema "$schema" codex "$tmp/prompt.md" .local/out.json
+has codex.1 --output-schema "$schema" || fail "codex without --output-schema"
+jq -e '.verdict == "NEEDS_CHANGES"' "$repo/.local/out.json" > /dev/null || fail "codex schema reply"
+jq -e '.harness == "codex" and .checks == false and .deadline == false and .cost_usd == null
+  and .tokens == {input: 100, cached: 40, output: 7} and (.seconds | type == "number")
+  and (.finished | type == "number")' "$record" > /dev/null \
+  || fail "codex run record: $(cat "$record")"
+STUB_REPLY="$finding" review --run-checks --schema "$schema" claude "$tmp/prompt.md" .local/out.json 2> /dev/null
+has claude.1 --json-schema "$(cat "$schema")" || fail "claude without --json-schema"
+jq -e '.verdict == "NEEDS_CHANGES"' "$repo/.local/out.json" > /dev/null || fail "claude schema reply"
+jq -e '.harness == "claude" and .checks == true and .cost_usd == 0.01 and .tokens == {input: 10, cached: 5, output: 3}' \
+  "$record" > /dev/null || fail "claude run record: $(cat "$record")"
+STUB_SLEEP=30 REVIEWER_TIMEOUT=2 STUB_RESUME_REPLY="$finding" review --schema "$schema" codex "$tmp/prompt.md" .local/out.json 2> /dev/null
+has codex.2 resume stub-thread || fail "no resume"
+has codex.2 --output-schema "$schema" || fail "codex resumed without the schema"
+jq -e '.verdict == "NEEDS_CHANGES"' "$repo/.local/out.json" > /dev/null || fail "schema reply after resume"
+jq -e '.deadline == true and .tokens == {input: 200, cached: 80, output: 14}' "$record" > /dev/null \
+  || fail "the run record doesn't add up both turns: $(cat "$record")"
+if review --schema "$tmp/none.json" codex "$tmp/prompt.md" .local/out.json 2> /dev/null; then fail "a missing schema accepted"; fi
+echo "ok - --schema and run records"
+
 echo OLD > "$out"
 if STUB_REPLY='' review codex "$tmp/prompt.md" .local/out.md 2> /dev/null; then
   fail "empty reply exits 0"
@@ -159,7 +183,130 @@ echo 'scratch' > "$repo/.local/scratch.txt"
 { [ "${before#* }" != "${edited#* }" ] && [ "${edited#* }" != "${added#* }" ]; } \
   || fail "state.sh fingerprint misses a change"
 [ "$(state)" = "$added" ] || fail "state.sh counts files in .local/"
+[ "$(git -C "$repo" cat-file -t "${added#*fingerprint=}")" = tree ] || fail "the fingerprint is not a git tree"
+git -C "$repo" diff --name-status "${before#*fingerprint=}" "${added#*fingerprint=}" > "$tmp/diff.out"
+{ grep -qx "$(printf 'M\tapp.py')" "$tmp/diff.out" && grep -qx "$(printf 'A\tnotes.txt')" "$tmp/diff.out"; } \
+  || fail "the diff of two fingerprints misses a change: $(cat "$tmp/diff.out")"
+git -C "$repo" diff --cached --quiet || fail "state.sh staged something"
+if git -C "$repo" ls-files --error-unmatch notes.txt > /dev/null 2>&1; then fail "state.sh added a file to the index"; fi
+outer="$tmp/outer"
+git init -q "$tmp/inner"
+echo one > "$tmp/inner/f.txt"
+git -C "$tmp/inner" add f.txt
+git -C "$tmp/inner" -c user.name=test -c user.email=test@example.com commit -qm inner
+git init -q "$outer"
+git -C "$outer" -c protocol.file.allow=always submodule add -q "$tmp/inner" inner 2> /dev/null
+git -C "$outer" -c user.name=test -c user.email=test@example.com commit -qm outer
+clean="$( (cd "$outer" && "$here/skills/review-loop/scripts/state.sh") )"
+echo two > "$outer/inner/f.txt"
+dirty="$( (cd "$outer" && "$here/skills/review-loop/scripts/state.sh") )"
+[ "${clean#*fingerprint=}" != "${dirty#*fingerprint=}" ] || fail "an edit inside a submodule leaves the fingerprint unchanged"
+printf 'same\n' > "$outer/inner/one.txt"
+printf 'same\n' > "$outer/inner/two.txt"
+ln -s one.txt "$outer/inner/link.txt"
+to_one="$( (cd "$outer" && "$here/skills/review-loop/scripts/state.sh") )"
+ln -sfn two.txt "$outer/inner/link.txt"
+to_two="$( (cd "$outer" && "$here/skills/review-loop/scripts/state.sh") )"
+[ "${to_one#*fingerprint=}" != "${to_two#*fingerprint=}" ] \
+  || fail "retargeting a symlink inside a submodule leaves the fingerprint unchanged"
+mkdir -p "$outer/.agentic-skills-library"
+echo 'mine' > "$outer/.agentic-skills-library/notes.txt"
+if (cd "$outer" && "$here/skills/review-loop/scripts/state.sh") > /dev/null 2>&1; then
+  fail "state.sh wrote over a path the work uses"
+fi
+rm -rf "$outer/.agentic-skills-library"
+(cd "$outer" && "$here/skills/review-loop/scripts/state.sh") > /dev/null || fail "state.sh fails on a sound submodule"
+# A required filter that doesn't exist makes git add fail inside the submodule.
+git -C "$outer/inner" config filter.missing.required true
+echo '*.bad filter=missing' > "$outer/inner/.gitattributes"
+echo 'x' > "$outer/inner/new.bad"
+if (cd "$outer" && "$here/skills/review-loop/scripts/state.sh") > /dev/null 2>&1; then
+  fail "state.sh succeeds when a submodule can't be snapshotted"
+fi
 echo "ok - state.sh"
+
+# refute.sh sends only findings not confirmed by running, and splits off the refuted ones.
+cat > "$repo/.local/round.json" <<'EOF'
+{"verdict": "NEEDS_CHANGES", "below_threshold": [], "declined": [], "findings": [
+  {"file": "app.py", "line": 1, "summary": "ran it", "failure_scenario": "f", "confidence": "confirmed-by-running"},
+  {"file": "app.py", "line": 1, "summary": "read it", "failure_scenario": "f", "confidence": "confirmed-by-reading"},
+  {"file": "app.py", "line": 1, "summary": "guessed", "failure_scenario": "f", "confidence": "plausible"}]}
+EOF
+refute() {
+  rm -rf "$STUB_RECORD"
+  mkdir -p "$STUB_RECORD"
+  (cd "$repo" && PATH="$here/tests/stubs:$PATH" "$here/skills/review-loop/scripts/refute.sh" "$@")
+}
+STUB_REPLY='{"verdicts": [{"finding": 2, "verdict": "refuted", "evidence": "app.py:1 shows it"},
+  {"finding": 1, "verdict": "stands", "evidence": "checked"}]}' refute codex .local/round.json > /dev/null
+has codex.1 --output-schema "$here/skills/review-loop/verdicts.schema.json" || fail "refute.sh doesn't ask for verdicts"
+jq -e '[.[].summary] == ["read it", "guessed"]' "$repo/.local/refute-input.json" > /dev/null \
+  || fail "refute.sh sent the wrong findings"
+jq -e '[.findings[].summary] == ["ran it", "read it"]' "$repo/.local/round.kept.json" > /dev/null \
+  || fail "refute.sh kept the wrong findings"
+jq -e 'length == 1 and .[0].finding.summary == "guessed" and .[0].evidence == "app.py:1 shows it"' \
+  "$repo/.local/round.refuted.json" > /dev/null || fail "refute.sh lost the refuted finding"
+jq '.findings |= map(select(.confidence == "confirmed-by-running"))' "$repo/.local/round.json" > "$repo/.local/ran.json"
+refute codex .local/ran.json > /dev/null
+[ -z "$(ls "$STUB_RECORD")" ] || fail "refute.sh ran a reviewer with nothing to refute"
+cmp -s "$repo/.local/ran.json" "$repo/.local/ran.kept.json" || fail "refute.sh changed a round with nothing to refute"
+STUB_REPLY='' refute codex .local/round.json > /dev/null 2>&1 || fail "refute.sh failed when its reviewer did"
+jq -e '.findings | length == 3' "$repo/.local/round.kept.json" > /dev/null || fail "a failed refute run dropped findings"
+echo "ok - refute.sh"
+
+# log-round.sh adds up this round's run records, and counts the findings in
+# lines that the previous round's fixes changed, not this round's.
+logged="$tmp/logged"
+mkdir -p "$logged"
+git -C "$logged" init -q
+seq 1 12 > "$logged/numbers.txt"
+git -C "$logged" add numbers.txt
+git -C "$logged" -c user.name=test -c user.email=test@example.com commit -qm init
+snapshot() { (cd "$logged" && "$here/skills/review-loop/scripts/state.sh") | sed 's/.*fingerprint=//'; }
+before_fixes="$(snapshot)"
+perl -pi -e 's/^3$/three/' "$logged/numbers.txt"
+printf 'new\nmore\n' > "$logged/added.txt"
+after_fixes="$(snapshot)"
+perl -pi -e 's/^10$/ten/' "$logged/numbers.txt"
+mkdir -p "$logged/.local"
+cat > "$logged/.local/review-round-2.json" <<EOF
+{"verdict": "NEEDS_CHANGES", "below_threshold": [], "declined": [], "findings": [
+  {"file": "$logged/numbers.txt", "line": 3, "summary": "s", "failure_scenario": "f", "confidence": "plausible"},
+  {"file": "numbers.txt", "line": 10, "summary": "s", "failure_scenario": "f", "confidence": "plausible"},
+  {"file": "added.txt", "line": 1, "summary": "s", "failure_scenario": "f", "confidence": "plausible"},
+  {"file": "added.txt", "line": 2, "summary": "s", "failure_scenario": "f", "confidence": "plausible"}]}
+EOF
+run_record() { # run_record <name> <finished> <seconds> <input tokens> <cached tokens>
+  printf '{"harness": "codex", "checks": true, "seconds": %s, "finished": %s, "deadline": false, "cost_usd": null, "tokens": {"input": %s, "cached": %s, "output": 1}}\n' \
+    "$3" "$2" "$4" "$5" > "$logged/.local/review-round-2$1.run.json"
+}
+run_record "" 1000 30 100 40
+run_record .verdicts 1010 12 50 10
+run_record .referee-F1 1020 5 10 0
+run_record .referee-F2 1030 5 10 0
+run_record .stale 900 99 1000 500
+log_round() { (cd "$logged" && XDG_STATE_HOME="$tmp/state" "$here/skills/review-loop/scripts/log-round.sh" "$@"); }
+log_round --round 2 --reported 4 --refuted 1 --accepted 1 --rejected 1 --disputed 0 \
+  --before "$before_fixes" --after "$after_fixes" --exit clean > /dev/null
+line="$(tail -n 1 "$tmp/state/agentic-skills-library/review-loop.jsonl")"
+jq -e '.round == 2 and .reported == 4 and .refuted == 1 and .accepted == 1 and .rejected == 1 and .disputed == 0
+  and .in_previous_fix == 3 and .lines == 6 and .exit == "clean" and .reviewer == "codex"
+  and .seconds == 52 and .cost_usd == null and .tokens == {input: 170, cached: 50, output: 4}' <<< "$line" > /dev/null \
+  || fail "log-round.sh wrote $line"
+log_round --round 1 --reported 0 --refuted 0 --accepted 0 --rejected 0 --disputed 0 > /dev/null
+jq -e '.round == 1 and .in_previous_fix == null and .exit == null and .seconds == 0' \
+  <<< "$(tail -n 1 "$tmp/state/agentic-skills-library/review-loop.jsonl")" > /dev/null || fail "log-round.sh without records"
+if log_round --round 1 --reported x 2> /dev/null; then fail "log-round.sh accepted a bad count"; fi
+# The outer repository's submodule still can't be snapshotted, so state.sh fails there.
+(cd "$outer" && XDG_STATE_HOME="$tmp/state" "$here/skills/review-loop/scripts/log-round.sh" --round 1 --reported 0 \
+  --refuted 0 --accepted 0 --rejected 0 --disputed 0 --exit "snapshot failed") > /dev/null \
+  || fail "log-round.sh can't log a round that state.sh fails in"
+jq -e '.lines == null and .exit == "snapshot failed"' \
+  <<< "$(tail -n 1 "$tmp/state/agentic-skills-library/review-loop.jsonl")" > /dev/null || fail "log-round.sh logged the failed snapshot wrongly"
+if log_round --round 1 --reported 0 --refuted 0 --accepted 0 --rejected 0 --disputed 0 --before "$before_fixes" 2> /dev/null; then
+  fail "log-round.sh accepted --before without --after"
+fi
+echo "ok - log-round.sh"
 
 # install.sh, run from a copy of this repository with its own commit, against a fake home.
 copy="$tmp/copy"

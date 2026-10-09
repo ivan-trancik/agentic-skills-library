@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "findings", "below_threshold", "declined"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["PASS", "NEEDS_CHANGES"]},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "line", "summary", "failure_scenario", "confidence"],
+        "properties": {
+          "file": {"type": "string"},
+          "line": {"type": "integer"},
+          "summary": {"type": "string"},
+          "failure_scenario": {"type": "string"},
+          "confidence": {"type": "string", "enum": ["confirmed-by-running", "confirmed-by-reading", "plausible"]}
+        }
+      }
+    },
+    "below_threshold": {"type": "array", "items": {"type": "string"}},
+    "declined": {"type": "array", "items": {"type": "string"}}
+  }
+}

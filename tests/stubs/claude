@@ -3,7 +3,8 @@
 # prints a result shaped like `--output-format json`, without calling a model.
 #
 #   STUB_RECORD  folder where each call's arguments are saved, NUL-separated
-#   STUB_REPLY   the result text
+#   STUB_REPLY   the result text, or with --json-schema the structured output,
+#                which defaults to a passing review
 #   STUB_ERROR   when set, the run reports an error instead of a result
 #   STUB_SLEEP   seconds to wait first, in a child process
 #   STUB_CLAUDE_VERSION  what --version reports
@@ -21,10 +22,18 @@ if [ -n "${STUB_SLEEP:-}" ]; then
   wait
 fi
 
+schema=0
+for arg in "$@"; do if [ "$arg" = --json-schema ]; then schema=1; fi; done
+usage='{"input_tokens": 10, "cache_read_input_tokens": 5, "output_tokens": 3}'
+passing='{"verdict":"PASS","findings":[],"below_threshold":[],"declined":[]}'
 if [ -n "${STUB_ERROR:-}" ]; then
   jq -n '{type: "result", subtype: "error_max_budget_usd", is_error: true, result: "budget reached"}'
+elif [ "$schema" = 1 ]; then
+  jq -n --argjson output "${STUB_REPLY:-$passing}" \
+    --argjson usage "$usage" '{type: "result", subtype: "success", is_error: false, result: "",
+      structured_output: $output, total_cost_usd: 0.01, usage: $usage, permission_denials: []}'
 else
-  jq -n --arg result "${STUB_REPLY-NO MUST-FIX FINDINGS}" \
+  jq -n --arg result "${STUB_REPLY-NO MUST-FIX FINDINGS}" --argjson usage "$usage" \
     '{type: "result", subtype: "success", is_error: false, result: $result,
-      total_cost_usd: 0.01, permission_denials: []}'
+      total_cost_usd: 0.01, usage: $usage, permission_denials: []}'
 fi

@@ -50,6 +50,14 @@ Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 
 - Change: run round one as `codex exec review -s workspace-write -o out.md "<prompt>" < /dev/null`, mapping P0 and P1 to must-fix and P2 and P3 to a "mentioned, not fixed" tail. Keep plain `codex exec` for design reviews: `exec review` has no `--image` and rejects `--worktree`.
 - Why: a custom prompt replaces only the user message, so Codex's rubric comes for free: a confidence score per finding, "the author would fix it", "pre-existing bugs should not be flagged", "provably affected". **Verified** flags and rubric text; the mapping of P-levels is **Inference**.
 - Check: review the same diff both ways on two tasks and compare findings and false positives.
+- Evaluated on 9 October 2026, on two cases rebuilt in throwaway clones with their known bugs: the first update before its round-1 fixes (two known bugs) and Batch 2 before its round-1 fixes (four known bugs; the exact tree `164f50a8`, kept by its snapshot). One run each, on Codex CLI 0.160.1 at `ultra`:
+
+  | Case | Known bugs | Prompt and schema through `codex exec` | `codex exec -s workspace-write review` with the same prompt |
+  |---|---|---|---|
+  | First update | 2 | 1 found, no false positives, 266 s | the same 1, no false positives, 253 s |
+  | Batch 2 | 4 | 3 found, no false positives, 246 s | all 4, no false positives, 322 s |
+
+  Neither found that `REVIEWER_TIMEOUT=0` switched the deadline off. By the agreed rule, review mode qualifies for round one. Switching costs more than the rule assumed, though. `exec review` ignores `--output-schema`: a probe answered in Codex's own text format after 402 s, so the loop's JSON findings would need a parser of that text, which Codex's next release could break. It reports no token counts and no confidence per finding. And Codex rated all five real bugs `[P2]`, so the mapping proposed above, P0 and P1 as must-fix, would have dropped every one of them. With one run per case, the extra finding is within run-to-run variation. Left for the user to decide.
 
 ## Phase 2: loop rules, prompt and ledger
 

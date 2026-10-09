@@ -21,7 +21,7 @@ The first [research cycle](research/README.md), in October 2026, compared the li
 - `ship` starts only when the user calls it by name.
 - This repository has an `AGENTS.md` and checks of its own.
 
-Since then, each skill names its scripts relative to its own folder, and `./install.sh --check` reports whether the installed copies match this repository. The review loop now takes the CLIs' own review tests, gets its findings as JSON, has a second reviewer try to disprove them, keeps a ledger of every finding, and logs every round. The design review takes its screenshots with Playwright: the whole page in readable tiles, tablet, phone, dark mode and keyboard focus, a canary image that proves the reviewer saw them, and a Lighthouse accessibility audit.
+Since then, each skill names its scripts relative to its own folder, and `./install.sh --check` reports whether the installed copies match this repository. The review loop now takes the CLIs' own review tests, gets its findings as JSON, has a second reviewer try to disprove them, keeps a ledger of every finding, and logs every round. The design review takes its screenshots with Playwright: the whole page in readable tiles, tablet, phone, dark mode and keyboard focus, a canary image that proves the reviewer saw them, and a Lighthouse accessibility audit. Of the research plan, only one decision is open: whether the Codex reviewer's first round should use Codex's own `review` command, which found one more bug in a two-case comparison but replies in a format the loop would have to parse.
 
 ## The skills
 

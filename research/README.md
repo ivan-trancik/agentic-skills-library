@@ -17,7 +17,7 @@ research/
 
 | Cycle | Question | Outcome |
 |---|---|---|
-| [2026-10-07 cross-agent review landscape](2026-10-07-cross-agent-review-landscape/report.md) | What do comparable libraries, the CLIs' built-in review commands, standards and studies do, and what should this library borrow? | Design confirmed. Sixteen improvements in the report, twenty-one items in the [plan](2026-10-07-cross-agent-review-landscape/plan.md); 1.1 to 1.3, 2.1 to 2.7, 3.1 to 3.3, 4.1 to 4.4, 5.1 and 5.2 done, and 4.5 dropped, on 8 and 9 October 2026. |
+| [2026-10-07 cross-agent review landscape](2026-10-07-cross-agent-review-landscape/report.md) | What do comparable libraries, the CLIs' built-in review commands, standards and studies do, and what should this library borrow? | Design confirmed. Sixteen improvements in the report, twenty-one items in the [plan](2026-10-07-cross-agent-review-landscape/plan.md); 1.1 to 1.3, 2.1 to 2.7, 3.1 to 3.3, 4.1 to 4.4, 5.1 and 5.2 done, and 4.5 dropped, on 8 and 9 October 2026; 1.4 evaluated, and whether to switch is the user's call. |
 
 ## Running a cycle
 

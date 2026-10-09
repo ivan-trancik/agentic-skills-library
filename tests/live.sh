@@ -8,7 +8,7 @@
 #   tests/live.sh [section ...]
 #
 # Sections, in the order they run: claude, codex, deadline, ship, paths, findings,
-# refute, weakened, cost.
+# refute, weakened, design, cost.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -303,6 +303,59 @@ for harness in codex claude; do
     "$loop/reviewer-prompt.md" ".local/weakened-$harness.json" 2> /dev/null) || true
   check "$harness flags the weakened test" json_has '.findings | any(.file | test("test_calc.py"))' \
     "$calc/.local/weakened-$harness.json"
+done
+fi
+
+if wanted design; then
+echo "Design review"
+design="$here/skills/review-design"
+site="$tmp/site"
+mkdir -p "$site/.local"
+git -C "$site" init -q
+cat > "$site/index.html" <<'EOF'
+<!doctype html><html lang="en"><head><title>Sign up</title><meta name="viewport" content="width=device-width"><style>
+body { font: 16px system-ui; margin: 40px; } @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } }
+button { font-size: 18px; padding: 8px 16px; margin-right: 12px; } #join:focus { outline: none; } .faint { color: #ccc; background: #fff; }
+</style></head><body><main><h1>Sign up</h1><button id="join">Join</button><button class="faint">Later</button></main></body></html>
+EOF
+python3 -I -c 'print("<!doctype html><html lang=\"en\"><head><title>Tall</title></head><body><main>"
+  + "".join(f"<p style=\"height: 600px\">Block {i}</p>" for i in range(25)) + "</main></body></html>")' > "$site/tall.html"
+commit_all "$site"
+port=$(( 20000 + RANDOM % 20000 ))
+(cd "$site" && exec python3 -I -m http.server "$port" --bind 127.0.0.1 > /dev/null 2>&1) &
+server=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.5; done
+shots="$site/.local/design"
+"$design/scripts/screenshot.sh" "http://127.0.0.1:$port/index.html" "$shots" > /dev/null || true
+"$design/scripts/screenshot.sh" "http://127.0.0.1:$port/tall.html" "$tmp/tall" > /dev/null 2>&1 || true
+"$design/scripts/a11y.sh" "http://127.0.0.1:$port/index.html" "$shots/a11y.txt" > /dev/null || true
+{ kill "$server" && wait "$server"; } 2> /dev/null || true
+differs() { ! cmp -s "$1" "$2"; }
+fails() { ! "$@" > /dev/null 2>&1; }
+must_fix_mentions() { case "$(sed '/Suggestions/,$d' "$1" | tr '[:upper:]' '[:lower:]')" in *"$2"*) return 0 ;; esac; return 1; }
+size_is() { [ "$(sips -g pixelWidth -g pixelHeight "$1" 2> /dev/null | awk '/pixel/ { printf "%s ", $2 }')" = "$2 " ]; }
+check "desktop.png is 1440 x 900" size_is "$shots/desktop.png" "1440 900"
+check "tablet.png is 768 x 1024" size_is "$shots/tablet.png" "768 1024"
+check "phone.png and focus.png exist" test -s "$shots/phone.png" -a -s "$shots/focus.png"
+check "dark.png differs from desktop.png" differs "$shots/desktop.png" "$shots/dark.png"
+check "shots.txt names the focused button" grep -q 'focused button#join' "$shots/shots.txt"
+check "a tall page gets twelve tiles" test -s "$tmp/tall/full-12.png" -a ! -e "$tmp/tall/full-13.png"
+check "a tall page reports the part no tile covers" grep -q 'no tile covers 10800 to' "$tmp/tall/shots.txt"
+echo 'CANARY: WRONG' > "$tmp/wrong-review.md"
+check "a wrong canary word fails the check" fails "$design/scripts/screenshot.sh" --check "$shots" "$tmp/wrong-review.md"
+check "a11y.sh reports the low contrast" grep -qi 'contrast' "$shots/a11y.txt"
+cat > "$site/.local/design-context.md" <<'EOF'
+Goals, as the user gave them: "A sign-up page with a Join button and a Later button. Everything must work from the keyboard."
+What changed: the sign-up page is new.
+Counts: 2 buttons.
+States not shown: none.
+EOF
+images=()
+while IFS= read -r image; do images+=("$shots/$image"); done < <(sed 's/:.*//' "$shots/shots.txt" | grep '\.png$')
+for harness in codex claude; do
+  (cd "$site" && "$reviewer" "$harness" "$design/reviewer-prompt.md" ".local/design-review-$harness.md" "${images[@]}" 2> /dev/null) || true
+  check "$harness read the canary" "$design/scripts/screenshot.sh" --check "$shots" "$site/.local/design-review-$harness.md"
+  check "$harness flags the unmarked focus" must_fix_mentions "$site/.local/design-review-$harness.md" focus
 done
 fi
 

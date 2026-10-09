@@ -4,7 +4,7 @@ Skills for coding agents, shared by Claude Code and Codex. `README.md` says what
 
 ## Checks
 
-Run `tests/check.sh`. It is free, offline and takes seconds, and it also runs inside Codex's sandbox: `bash -n`, `shellcheck` and permissions for every script, that every symlink resolves, `claude plugin validate skills`, tests that run `reviewer.sh` and `state.sh` against the stub `codex` and `claude` commands in `tests/stubs/`, and tests of `install.sh` against a fake home. It needs `shellcheck` and `jq`.
+Run `tests/check.sh`. It is free, offline and takes seconds, and it also runs inside Codex's sandbox: `bash -n`, `shellcheck` and permissions for every script, `node --check` for the capture script, that every symlink resolves, `claude plugin validate skills`, tests that run `reviewer.sh` and `state.sh` against the stub `codex` and `claude` commands in `tests/stubs/`, tests of `screenshot.sh --check`, and tests of `install.sh` against a fake home. It needs `shellcheck`, `jq` and Node.js.
 
 `tests/validate.sh` runs Codex's skill validator and the Agent Skills reference validator through `uv`, at pinned versions. Run it after changing a skill's front matter. Its first run downloads the validators, and it can't run inside Codex's sandbox.
 

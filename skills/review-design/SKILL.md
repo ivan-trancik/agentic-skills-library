@@ -8,23 +8,29 @@ Have the other coding agent review the page you changed, from screenshots. This 
 `${CLAUDE_SKILL_DIR}` in the commands below stands for this skill's folder, the one that holds this file.
 
 1. Start the app the way `AGENTS.md` says, in the background, and make sure it shows realistic data. In a Superset workspace, `./.superset/run.sh` starts it on the workspace's own port.
-2. Take screenshots into `.local/design/`:
+2. Take the screenshots and run the accessibility audit. Each script fetches its tool through `npx` on its first run.
 
    ```
-   ${CLAUDE_SKILL_DIR}/scripts/screenshot.sh <url> .local/design/desktop.png 1440 900
-   ${CLAUDE_SKILL_DIR}/scripts/screenshot.sh <url> .local/design/desktop-full.png 1440 4000
-   ${CLAUDE_SKILL_DIR}/scripts/screenshot.sh <url> .local/design/phone.png 390 844
+   ${CLAUDE_SKILL_DIR}/scripts/screenshot.sh <url> .local/design
+   ${CLAUDE_SKILL_DIR}/scripts/a11y.sh <url> .local/design/a11y.txt
    ```
 
-   Add one for each state the task is about, such as an opened row or an empty page. The script can't click, so use your own browser tools for those.
-3. Write `.local/design-context.md`: the user's design goals, word for word; what you changed; and each screenshot's file name with what it shows.
-4. Run the reviewer from the repository root, in the foreground with a 10-minute timeout, passing every screenshot. The script keeps the reviewer read-only and stops it if it runs past eight minutes. Pass `codex` if you are Claude Code and `claude` if you are Codex:
+   `screenshot.sh` writes a canary image, the desktop view, the whole page in tiles, tablet, phone, dark mode and the page after one Tab press, and lists them with what each shows in `.local/design/shots.txt`. If it says part of a long page has no tile and the change is in that part, capture that part with your own browser tools. Do the same for each state the task is about that needs a click, such as an opened row or an empty page. Add each image you take to `shots.txt`.
+3. Write `.local/design-context.md`: the user's design goals, word for word; what you changed; the counts the screenshots should show, such as "8 rows" or "3 tabs"; and the states the screenshots don't show, so that the reviewer doesn't report them missing.
+4. Run the reviewer from the repository root, in the foreground with a 10-minute timeout, passing every image in the order `shots.txt` lists them, `canary.png` first. The script keeps the reviewer read-only and stops it if it runs past eight minutes. Pass `codex` if you are Claude Code and `claude` if you are Codex:
 
    ```
-   ${CLAUDE_SKILL_DIR}/scripts/reviewer.sh <codex|claude> ${CLAUDE_SKILL_DIR}/reviewer-prompt.md .local/design-review.md .local/design/desktop.png .local/design/desktop-full.png .local/design/phone.png
+   ${CLAUDE_SKILL_DIR}/scripts/reviewer.sh <codex|claude> ${CLAUDE_SKILL_DIR}/reviewer-prompt.md .local/design-review.md .local/design/canary.png .local/design/desktop.png ...
    ```
 
    If the reviewer can't run or writes nothing, tell the user and show them the screenshots unreviewed.
-5. Read `.local/design-review.md`. Fix the must-fix findings you agree with. Leave the suggestions for the user to choose from.
-6. Take the screenshots again and stop the app.
-7. Show the user the screenshot files, what you fixed, and the reviewer's suggestions and any findings you didn't take. Then stop and wait for the user's feedback.
+5. Check that the reviewer saw the images:
+
+   ```
+   ${CLAUDE_SKILL_DIR}/scripts/screenshot.sh --check .local/design .local/design-review.md
+   ```
+
+   If the check fails, the review describes images the reviewer didn't see: don't use it. Tell the user, and show them the screenshots unreviewed.
+6. Read `.local/design-review.md`. Fix the must-fix findings you agree with. Leave the suggestions for the user to choose from.
+7. Take the screenshots again and stop the app.
+8. Show the user the screenshot files, what you fixed, and the reviewer's suggestions and any findings you didn't take. Then stop and wait for the user's feedback.

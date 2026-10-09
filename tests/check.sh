@@ -21,6 +21,8 @@ for script in "${scripts[@]}"; do
   [ -x "$script" ] || fail "$script is not executable"
 done
 shellcheck "${scripts[@]}"
+while IFS= read -r -d '' script; do node --check "$script" || fail "$script doesn't parse"; done \
+  < <(find skills -type f -name '*.cjs' -print0)
 while IFS= read -r -d '' link; do
   [ -e "$link" ] || fail "$link points at nothing"
 done < <(find skills -type l -print0)
@@ -307,6 +309,19 @@ if log_round --round 1 --reported 0 --refuted 0 --accepted 0 --rejected 0 --disp
   fail "log-round.sh accepted --before without --after"
 fi
 echo "ok - log-round.sh"
+
+# screenshot.sh --check finds the canary word in a review, in any case, and nothing else will do.
+shots="$tmp/shots"
+mkdir -p "$shots"
+printf '%s' PLUM | shasum | cut -d' ' -f1 > "$shots/canary.sha"
+canary_check() { printf '%b' "$1" > "$tmp/design-review.md"; "$here/skills/review-design/scripts/screenshot.sh" --check "$2" "$tmp/design-review.md" > /dev/null 2>&1; }
+canary_check 'CANARY: PLUM\nNO MUST-FIX DESIGN FINDINGS\n' "$shots" || fail "the canary check missed the word"
+canary_check '**CANARY: plum**\n' "$shots" || fail "the canary check missed the word in bold or lower case"
+if canary_check 'CANARY: NONE\n' "$shots"; then fail "the canary check passed NONE"; fi
+if canary_check 'CANARY: PLUMS\n' "$shots"; then fail "the canary check passed a different word"; fi
+if canary_check 'No canary here.\n' "$shots"; then fail "the canary check passed a review without the word"; fi
+if canary_check 'CANARY: PLUM\n' "$tmp/nowhere"; then fail "the canary check passed without a hash"; fi
+echo "ok - screenshot.sh --check"
 
 # install.sh, run from a copy of this repository with its own commit, against a fake home.
 copy="$tmp/copy"

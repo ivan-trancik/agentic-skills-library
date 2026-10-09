@@ -105,23 +105,26 @@ Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 
 
 ## Phase 3: design review pipeline
 
-### 3.1 Fix the capture before tuning the prompt `[ ]`
+### 3.1 Fix the capture before tuning the prompt `[x]`
 
 - Change: tile the full-page capture into slices of at most 1568 px, or replace `screenshot.sh` with a Playwright script that gives `fullPage`, device descriptors, `emulateMedia({colorScheme:'dark'})` and `animations:'disabled'`. Add a 768 px pass, a dark-mode capture and a Tab-press focus capture. Label images in file-list order.
 - Why: Anthropic's documented resize rule shrinks 1440x4000 to about 564x1568 on standard-tier models, so 16 px text lands at about 6 px. **Verified** rule; the figure is computed from it.
 - Check: text in every delivered image is still legible after the vendor's resize.
+- Done on 9 October 2026 with Playwright 1.63.0, through `npx`, driving the installed Chrome. `screenshot.sh` runs `capture.cjs` in one browser session after the network goes quiet and with animations off: desktop at 1440 x 900, the whole page cut into 900-pixel tiles with `sips` (at most twelve, and the part no tile covers is named), tablet at 768 x 1024, phone as a Pixel 7 (the iPhone profiles need WebKit), dark mode, and the page after one Tab press, naming the focused element. `shots.txt` lists the images in order with what each shows. Every image is at most 1440 x 900 apart from the phone's, so text stays legible after either vendor's resize. Clicked states are still the builder's own browser tools.
 
-### 3.2 Delivery check and stated counts `[ ]`
+### 3.2 Delivery check and stated counts `[x]`
 
 - Change: include a canary image with a random word that the reviewer must transcribe first. Have the builder state the expected counts and the states not captured in `.local/design-context.md`. Change the prompt from "count it" to "verify the stated count".
 - Why: one issue reports total fabrication of image content in `-p` mode when the image data did not arrive; both vendors document weak counting and small-text reading. **Verified** issue report and vendor limitations.
 - Check: remove the canary file and confirm the reviewer reports it missing instead of describing it.
+- Done on 9 October 2026. `canary.png` shows a random dictionary word; only its hash is kept, and `screenshot.sh --check` confirms the review names it before the builder uses the review. `design-context.md` states the expected counts and the states not shown, and the prompt checks stated counts rather than counting. `tests/check.sh` tests the canary check, and `tests/live.sh` checks that both reviewers read the canary.
 
-### 3.3 Objective checks `[ ]`
+### 3.3 Objective checks `[x]`
 
 - Change: run `@axe-core/playwright` for contrast, labels and focus; optionally a same-session `pixelmatch` on pages the task did not touch and an accessibility-snapshot text diff for "information no longer reachable". Feed the results to the reviewer with the rule "problems over prescriptions".
 - Why: structured inputs lift vision-model accuracy sharply on exactly the defects the prompt asks about. **Inference**; the tooling facts are **Verified**.
 - Check: a deliberately low-contrast button is caught by axe and relayed by the reviewer.
+- Done on 9 October 2026 with Lighthouse 13.5.0's accessibility audit, which runs axe, through `npx`: `a11y.sh` writes the failing checks and their elements to `a11y.txt`, and the prompt passes on those that make content unreadable or unreachable or that a goal covers, describing problems rather than fixes. `tests/live.sh` checks that it reports a low-contrast button, and that both reviewers flag a focused button with no visible mark. Not done: pixel diffs of untouched pages and accessibility-tree diffs, which were optional; they need Playwright installed in each project, and pixel diffs are noisy between runs.
 
 ## Phase 4: skill hygiene, installer and distribution
 

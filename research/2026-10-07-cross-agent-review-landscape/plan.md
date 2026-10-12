@@ -17,7 +17,7 @@ Nothing below changes the design. A reviewer from the other vendor, must-fix fin
 | Disputed findings | Leave them for the user, or run a fresh third reviewer as referee first | Referee, then the user. It costs one more launch only when a dispute exists. |
 | Publishing | Keep the repository private with `install.sh`, or publish it so `npx skills add` and plugin marketplaces work | Decide after Phase 4. |
 
-Decided on 8 October 2026: `--safe-mode` for the Claude reviewer, together with `--restricted` (see 1.1), and a cap of three rounds.
+Decided on 8 October 2026: `--safe-mode` for the Claude reviewer, together with `--restricted` (see 1.1), and a cap of three rounds. Decided on 12 October 2026, after the comparison in 1.4: Codex's round one stays plain `codex exec` with the loop's prompt, which takes over the rubric's "do not stop at the first qualifying finding".
 
 ## Phase 1: the reviewer cannot edit, and the launches are correct
 
@@ -43,7 +43,7 @@ Decided on 8 October 2026: `--safe-mode` for the Claude reviewer, together with 
 - Check: the reviewer log shows the configured effort; a forced timeout resumes and still produces findings.
 - Done on 8 October 2026, corrected. The `perl alarm; exec` recipe would stop only the Superset `codex` wrapper, which runs the real binary as a child, so the script runs the reviewer in a process group of its own and stops the whole group. The deadline is 480 seconds plus one resume of at most 90 seconds at `medium` effort, inside the builder's 10-minute command limit; `-s` has to come before `resume`. The `-o` path is absolute, taken from the repository root. Meanwhile the user's default moved to `gpt-6.1-sol` at `ultra`, so the old override had sat further below it.
 
-### 1.4 Evaluate `codex exec review` for round one `[ ]`
+### 1.4 Evaluate `codex exec review` for round one `[-]`
 
 Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 0.160.1 with "unexpected argument '-s' found". The sandbox flag goes before the subcommand, `codex exec -s workspace-write review ...`; whether the review thread honours it is untested.
 
@@ -58,6 +58,7 @@ Correction, 8 October 2026: `codex exec review -s workspace-write ...` fails on 
   | Batch 2 | 4 | 3 found, no false positives, 246 s | all 4, no false positives, 322 s |
 
   Neither found that `REVIEWER_TIMEOUT=0` switched the deadline off. By the agreed rule, review mode qualifies for round one. Switching costs more than the rule assumed, though. `exec review` ignores `--output-schema`: a probe answered in Codex's own text format after 402 s, so the loop's JSON findings would need a parser of that text, which Codex's next release could break. It reports no token counts and no confidence per finding. And Codex rated all five real bugs `[P2]`, so the mapping proposed above, P0 and P1 as must-fix, would have dropped every one of them. With one run per case, the extra finding is within run-to-run variation. Left for the user to decide.
+- Dropped on 12 October 2026 by the user's decision: one extra finding in one run doesn't pay for a parser of Codex's text, for losing token counts and confidence, or for a P-level mapping that would have dropped every real bug. Instead `skills/review-loop/reviewer-prompt.md` now tells the reviewer not to stop at the first finding, the one line of the volume rule that the 2.2 tests didn't already cover.
 
 ## Phase 2: loop rules, prompt and ledger
 

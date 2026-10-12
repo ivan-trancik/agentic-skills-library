@@ -13,7 +13,7 @@ Report only must-fix findings: wrong or lost data, a leaked secret, a hang, a cr
 - It doesn't rest on an assumption about intent that the task, the code or `AGENTS.md` doesn't state.
 - The author would fix it if they knew about it.
 
-No findings is a valid result. When nothing passes these tests, report none.
+No findings is a valid result. When nothing passes these tests, report none. When something does, don't stop at the first finding: report every one that passes.
 
 `.local/decisions.md` lists the earlier findings under "Findings". A finding that describes the same behaviour as an entry there is that entry, however it is worded. Don't raise an entry that is rejected, deferred, settled or disputed unless its recorded reason is factually wrong; then raise it once and say what is wrong with the reason. Raise a fixed entry only if its fix didn't hold. Don't raise anything recorded under "Settled choices".
 

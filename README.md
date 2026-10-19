@@ -21,14 +21,14 @@ The first [research cycle](research/README.md), in October 2026, compared the li
 - `ship` starts only when the user calls it by name.
 - This repository has an `AGENTS.md` and checks of its own.
 
-Since then, each skill names its scripts relative to its own folder, and `./install.sh --check` reports whether the installed copies match this repository. The review loop now takes the CLIs' own review tests, gets its findings as JSON, has a second reviewer try to disprove them, keeps a ledger of every finding, and logs every round. The design review takes its screenshots with Playwright: the whole page in readable tiles, tablet, phone, dark mode and keyboard focus, a canary image that proves the reviewer saw them, and a Lighthouse accessibility audit. The Codex reviewer keeps the loop's own prompt rather than Codex's `review` command, which found one more bug in a two-case comparison but replies in a format the loop would have to parse; the prompt took over that command's rule not to stop at the first finding.
+Since then, each skill names its scripts relative to its own folder, and `./install.sh --check` reports whether the installed copies match this repository. The review loop now takes the CLIs' own review tests, gets its findings as JSON, has a second reviewer try to disprove them, keeps a ledger of every finding, and logs every round. The design review takes its screenshots with Playwright: the whole page in readable tiles, tablet, phone, dark mode and keyboard focus, a canary image that proves the reviewer saw them, and a Lighthouse accessibility audit. Only the reviewer sees those screenshots: the user gets the live page, opened in a browser tab and left running for them to try, in a Superset workspace through the `superset` CLI, checked on version 1.36.0. The Codex reviewer keeps the loop's own prompt rather than Codex's `review` command, which found one more bug in a two-case comparison but replies in a format the loop would have to parse; the prompt took over that command's rule not to stop at the first finding.
 
 ## The skills
 
 | Skill | What it does |
 |---|---|
 | `review-plan` | One round of review on a plan before any code is written |
-| `review-design` | One round of review on the look of a changed page, from screenshots |
+| `review-design` | One round of review on the look of a changed page, from screenshots; then the live page opens for the user |
 | `review-loop` | Code review by the other agent, fixes, and repeat while the findings keep falling; then a commit |
 | `save-review` | The reviewer writes its findings to `.local/review.md` for another agent |
 | `apply-review` | The builder fixes the findings it agrees with and asks the user about the rest |

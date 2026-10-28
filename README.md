@@ -94,3 +94,7 @@ jq -s 'map(select(.round > 1)) | {later_findings: (map(.reported) | add), in_pre
 ## Adding a skill
 
 Add a folder under `skills/` with a `SKILL.md` that starts with `name` and `description` front matter. Put its scripts in `scripts/` and name them as `${CLAUDE_SKILL_DIR}/scripts/<name>`, after the line the other skills use to tell Codex what that stands for; a script another skill already has is a symlink to it. Run `tests/check.sh` and `tests/validate.sh`, and reinstall.
+
+## License
+
+[MIT](LICENSE).

@@ -29,7 +29,10 @@ It writes the answer only when Argon opened every file and answered. When it fai
 4. Check every row, and mark it confirmed, contradicted or unchecked:
    - A row about what is on screen: look at a strip of eight frames from a second either side of its time, or of the middle of its range. Take the strip with `ffmpeg -v error -ss <that time minus 1 second> -i <video> -t 2 -vf fps=4,scale=320:-2,tile=4x2 -frames:v 1 .local/gemini/<name>-<m>m<ss>s.jpg`, then read the image.
    - A row about what is heard stays unchecked: neither Claude nor Codex can listen.
-5. Report the table with your marks. Give the user the times of the unchecked rows and of the fast moments, to check for themselves. Then carry on with the task: Argon found the moments, and you analyse them and make any change that follows.
+5. If the user's question turns on a fast moment, such as a lift, a stride or something that flashes on screen, including one that Argon listed as too fast to judge, slow it down and ask again. Cut the few seconds around it and slow them `<n>` times, without sound: `ffmpeg -v error -ss <start> -to <end> -i <video> -vf 'setpts=<n>*PTS' -an -pix_fmt yuv420p .local/gemini/<name>-slow.mp4`. Argon then sees `<n>` frames for each real second, up to the video's own frame rate. Four times is a good start; very fast motion, such as a bar path, may need eight. The slow part costs `<n>` times its tokens, so keep the cut short.
+   - Run `ask.sh --media` on the slow clip with a brief that adds which part of the original it is and how much it is slowed, so that Argon judges speed accordingly.
+   - A time `t` in the slow clip is `<start> + t / <n>` in the original. Check the rows against the slow clip as in step 4, and give the user times in the original.
+6. Report the table with your marks. Give the user the times of the unchecked rows and of the fast moments, to check for themselves. Then carry on with the task: Argon found the moments, and you analyse them and make any change that follows.
 
 ## A second opinion on a costly decision
 

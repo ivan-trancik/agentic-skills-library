@@ -92,6 +92,7 @@ Working files go in `.local/` in the project. The scripts add `.local/` to the r
 - The stream shows every file Argon opened, with its path, and a file it didn't open fails the run.
 - `GEMINI_TIMEOUT`, 480 seconds by default, is the deadline. `agy`'s own `--print-timeout` ends 30 seconds sooner, so a slow answer comes back marked as cut off. Each run leaves a record beside its answer: the model, seconds, status, tokens and conversation.
 - `GEMINI_MODEL` overrides the model, which is `gemini-4-argon-medium` for video and audio and `gemini-4-argon-high` for second opinions. In one test, a minute of video with sound took about 8,000 input tokens.
+- `agy` samples video at about one frame a second and has no setting to change that. For a fast moment, the skill cuts a few seconds and slows them down with ffmpeg, so that Argon sees more frames for each real second. In a test with two 0.3-second flashes, Argon could place each only within two seconds at normal speed, and within a quarter of a second once the part was slowed four times.
 - From Codex, `ask.sh` runs inside the `workspace-write` sandbox when that sandbox has network access, and outside it otherwise. The sign-in in the keychain works from inside.
 - `agy` updates itself whenever it runs, even for `--version`, so its version moves on its own. `tests/live.sh gemini` checks the behaviour above against whatever version is installed.
 

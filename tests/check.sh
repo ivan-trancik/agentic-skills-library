@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The checks for this repository: syntax, lint and permissions for every
 # script, Claude Code's skill validator, tests that run reviewer.sh and
-# state.sh against the stub codex and claude commands in tests/stubs, and
-# tests of install.sh against a fake home. Free and offline: no model is
-# called, and it runs inside Codex's sandbox.
+# state.sh against the stub codex and claude commands in tests/stubs, tests
+# that run ask.sh against the stub agy, and tests of install.sh against a
+# fake home. Free and offline: no model is called, and it runs inside Codex's
+# sandbox.
 #
 #   tests/check.sh
 set -euo pipefail
@@ -323,6 +324,123 @@ if canary_check 'No canary here.\n' "$shots"; then fail "the canary check passed
 if canary_check 'CANARY: PLUM\n' "$tmp/nowhere"; then fail "the canary check passed without a hash"; fi
 echo "ok - screenshot.sh --check"
 
+# ask.sh runs Argon in a throwaway folder that holds copies of the files and
+# nothing else, and keeps an answer only from a run that answered and opened them all.
+ask() {
+  rm -rf "$STUB_RECORD"
+  mkdir -p "$STUB_RECORD"
+  (cd "$repo" && PATH="$here/tests/stubs:$PATH" "$here/skills/ask-gemini/scripts/ask.sh" "$@")
+}
+# prompt_of <call>: the call's last argument, when the one before it is -p.
+prompt_of() { perl -0ne 'chomp; push @a, $_; END { print $a[-1] if @a > 1 && $a[-2] eq "-p" }' "$STUB_RECORD/$1"; }
+# settings_of <call>: the argument after --settings.
+settings_of() { perl -0ne 'chomp; if ($take) { print; exit } $take = ($_ eq "--settings")' "$STUB_RECORD/$1"; }
+gemini="$repo/.local/gemini"
+mkdir -p "$gemini" "$repo/clips/a" "$repo/clips/b"
+echo "What colour is the screen?" > "$gemini/brief.md"
+printf 'video' > "$repo/clips/a/clip.mp4"
+printf 'another video' > "$repo/clips/b/clip.mp4"
+printf 'audio' > "$repo/talk.m4a"
+answer="$gemini/answer.md"
+ask_record="$gemini/answer.run.json"
+brief=(.local/gemini/brief.md .local/gemini/answer.md)
+
+# An open stdin with nothing on it, which agy -p can wait on forever.
+ask --media "${brief[@]}" clips/a/clip.mp4 talk.m4a clips/b/clip.mp4 < <(sleep 10)
+folder="$(cat "$STUB_RECORD/agy.1.cwd")"
+case "$folder" in /tmp/ask-gemini.*) ;; *) fail "ask.sh ran agy in $folder, not in a throwaway folder" ;; esac
+[ ! -e "$folder" ] || fail "ask.sh left its throwaway folder behind"
+[ "$(tr '\n' ' ' < "$STUB_RECORD/agy.1.files")" = "2-clip.mp4 clip.mp4 talk.m4a " ] \
+  || fail "the throwaway folder held $(tr '\n' ' ' < "$STUB_RECORD/agy.1.files")"
+[ "$(cat "$STUB_RECORD/agy.1.stdin")" = closed ] || fail "ask.sh left agy's stdin open"
+has agy.1 --model gemini-4-argon-medium || fail "ask.sh --media model"
+has agy.1 --output-format stream-json || fail "ask.sh output format"
+has agy.1 --disable-slash-commands || fail "ask.sh slash commands"
+has agy.1 --sandbox || fail "ask.sh terminal sandbox"
+has agy.1 --print-timeout 450s || fail "ask.sh print timeout"
+jq -e --arg home "$HOME" '.toolPermission == "request-review" and (.permissions.deny | contains(["command(*)",
+  "write_file(*)", "read_url(*)", "execute_url(*)", "mcp(*)", "read_file(/Users/)", "read_file(/Volumes/)",
+  "read_file(\($home)/)"]))' <<< "$(settings_of agy.1)" > /dev/null || fail "ask.sh session settings: $(settings_of agy.1)"
+prompt="$(prompt_of agy.1)"
+case "$prompt" in "$(head -n 1 "$here/skills/ask-gemini/media-prompt.md")"*) ;; *) fail "the prompt doesn't start with the media instructions" ;; esac
+case "$prompt" in *"- clip.mp4"*"- talk.m4a"*"- 2-clip.mp4"*"## The brief"*"What colour is the screen?") ;;
+  *) fail "the prompt lacks the files or the brief: $prompt" ;; esac
+[ "$(cat "$answer")" = "NOTHING TO REPORT" ] || fail "ask.sh answer"
+jq -e '.harness == "agy" and .job == "media" and .model == "gemini-4-argon-medium" and .status == "SUCCESS"
+  and .deadline == false and .finished_reason == null and .conversation_id == "stub-conversation" and .files == 3
+  and .not_opened == [] and .tokens == {input: 100, cached: 40, output: 7, thinking: 3}
+  and (.seconds | type == "number") and (.finished | type == "number")' "$ask_record" > /dev/null \
+  || fail "ask.sh run record: $(cat "$ask_record")"
+echo "ok - ask.sh, media"
+
+ask --second-opinion "${brief[@]}"
+has agy.1 --model gemini-4-argon-high || fail "ask.sh --second-opinion model"
+case "$(prompt_of agy.1)" in "$(head -n 1 "$here/skills/ask-gemini/second-opinion-prompt.md")"*"There are no files"*) ;;
+  *) fail "the second-opinion prompt" ;; esac
+[ ! -s "$STUB_RECORD/agy.1.files" ] || fail "a run without files had files in its folder"
+GEMINI_MODEL=gemini-4-argon-low ask --media "${brief[@]}" talk.m4a
+has agy.1 --model gemini-4-argon-low || fail "ask.sh GEMINI_MODEL"
+echo "ok - ask.sh, second opinion and GEMINI_MODEL"
+
+echo OLD > "$answer"
+if STUB_SKIP_OPEN=talk.m4a ask --media "${brief[@]}" clips/a/clip.mp4 talk.m4a 2> "$tmp/stderr"; then
+  fail "ask.sh kept an answer from a run that didn't open a file"
+fi
+[ ! -e "$answer" ] || fail "ask.sh left an answer behind when a file wasn't opened"
+grep -qF "didn't open talk.m4a" "$tmp/stderr" || fail "ask.sh doesn't name the file Argon didn't open"
+jq -e '.not_opened == ["talk.m4a"]' "$ask_record" > /dev/null || fail "the run record doesn't name the unopened file"
+if STUB_STATUS=ERROR ask --media "${brief[@]}" talk.m4a 2> /dev/null; then fail "ask.sh accepted an ERROR status"; fi
+[ ! -e "$answer" ] || fail "ask.sh wrote the answer of a failed run"
+if STUB_REPLY='' ask --media "${brief[@]}" talk.m4a 2> /dev/null; then fail "ask.sh accepted an empty answer"; fi
+[ ! -e "$answer" ] || fail "ask.sh wrote an empty answer"
+STUB_FINISHED_REASON=print_timeout ask --media "${brief[@]}" talk.m4a 2> "$tmp/stderr" \
+  || fail "ask.sh dropped an answer that agy's time limit cut off"
+grep -qF 'cut off (print_timeout)' "$tmp/stderr" || fail "ask.sh doesn't warn of a cut-off answer"
+jq -e '.finished_reason == "print_timeout"' "$ask_record" > /dev/null || fail "the run record doesn't say the answer was cut off"
+if STUB_SLEEP=30 GEMINI_TIMEOUT=2 ask --media "${brief[@]}" talk.m4a 2> "$tmp/stderr"; then
+  fail "ask.sh past the deadline exits 0"
+fi
+if still_running agy; then fail "agy still running after the deadline"; fi
+grep -qF 'passed its 2-second deadline' "$tmp/stderr" || fail "ask.sh doesn't report the deadline"
+jq -e '.deadline == true' "$ask_record" > /dev/null || fail "the run record misses the deadline"
+[ ! -e "$answer" ] || fail "ask.sh wrote an answer after the deadline"
+[ ! -e "$(cat "$STUB_RECORD/agy.1.cwd")" ] || fail "ask.sh left its throwaway folder behind after the deadline"
+echo "ok - ask.sh, failed runs and the deadline"
+
+mkdir -p "$HOME/.gemini/antigravity-cli"
+echo '{"toolPermission": "always-proceed"}' > "$HOME/.gemini/antigravity-cli/settings.json"
+if ask --media "${brief[@]}" talk.m4a 2> "$tmp/stderr"; then fail "ask.sh ran under a global always-proceed"; fi
+[ ! -e "$STUB_RECORD/agy.1" ] || fail "ask.sh called agy under a global always-proceed"
+grep -qF 'always-proceed' "$tmp/stderr" || fail "ask.sh doesn't say why it refused"
+rm "$HOME/.gemini/antigravity-cli/settings.json"
+if ask 2> /dev/null; then fail "ask.sh accepted no arguments"; fi
+if ask --video "${brief[@]}" 2> /dev/null; then fail "ask.sh accepted an unknown job"; fi
+if ask --media .local/gemini/none.md .local/gemini/answer.md 2> /dev/null; then fail "ask.sh accepted a missing brief"; fi
+if ask --media "${brief[@]}" none.mp4 2> /dev/null; then fail "ask.sh accepted a missing file"; fi
+for bad in soon 0 -5 1.5; do
+  if GEMINI_TIMEOUT="$bad" ask --media "${brief[@]}" 2> /dev/null; then fail "GEMINI_TIMEOUT=$bad accepted"; fi
+done
+echo "ok - ask.sh, refusals and usage errors"
+
+# log.sh adds one line per Gemini job, with the run's record when there is one.
+gemini_log() { (cd "$repo" && XDG_STATE_HOME="$tmp/state" "$here/skills/ask-gemini/scripts/log.sh" "$@"); }
+ask --media "${brief[@]}" talk.m4a
+gemini_log --job media --added yes --corrections 007 --answer .local/gemini/answer.md > /dev/null
+line="$(tail -n 1 "$tmp/state/agentic-skills-library/ask-gemini.jsonl")"
+jq -e '.job == "media" and .route == "cli" and .added == true and .corrections == 7 and .repo == "repo"
+  and .model == "gemini-4-argon-medium" and .tokens.input == 100 and (.seconds | type == "number")
+  and (.time | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T"))' <<< "$line" > /dev/null || fail "log.sh wrote $line"
+gemini_log --job gmail-drive --added no --corrections 0 > /dev/null
+line="$(tail -n 1 "$tmp/state/agentic-skills-library/ask-gemini.jsonl")"
+jq -e '.job == "gmail-drive" and .route == "app" and .added == false and .model == null' <<< "$line" > /dev/null \
+  || fail "log.sh wrote $line for a hand-off"
+for bad in "--job video --added yes --corrections 0" "--job media --added maybe --corrections 0" \
+  "--job media --added yes --corrections x" "--job media --added yes"; do
+  # shellcheck disable=SC2086 # each word is an argument
+  if gemini_log $bad 2> /dev/null; then fail "log.sh accepted $bad"; fi
+done
+echo "ok - ask-gemini's log.sh"
+
 # install.sh, run from a copy of this repository with its own commit, against a fake home.
 copy="$tmp/copy"
 home="$tmp/install-home"
@@ -345,7 +463,7 @@ grep -qF "managed copy of $(git -C "$copy" rev-parse --short HEAD)" "$installed/
 [ "$(readlink "$home/.claude/skills/ship")" = "$installed/ship" ] || fail "no Claude Code link"
 grep -qF 'agentic-skills-library:start' "$home/.codex/AGENTS.md" || fail "no instruction block"
 installer --check > "$tmp/check.out" 2>&1 || fail "--check right after install: $(cat "$tmp/check.out")"
-[ "$(grep -c ': current$' "$tmp/check.out")" = 8 ] || fail "--check doesn't report all six skills and both blocks current"
+[ "$(grep -c ': current$' "$tmp/check.out")" = 9 ] || fail "--check doesn't report all seven skills and both blocks current"
 if grep -q '^note:' "$tmp/check.out"; then fail "--check notes a version that matches"; fi
 STUB_CODEX_VERSION=0.999.0 installer --check > "$tmp/check.out" 2>&1 || true
 grep -q '^note: codex is 0.999.0, but the skills were last verified on 0.160.1' "$tmp/check.out" \

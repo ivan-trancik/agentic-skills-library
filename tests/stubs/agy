@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Stands in for agy, the Antigravity CLI, in tests/check.sh: records its
+# arguments, the folder it ran in, the files there and whether its stdin was
+# closed, and prints a stream shaped like `--output-format stream-json`,
+# without calling a model. It opens every file in its folder.
+#
+#   STUB_RECORD     folder where each call's arguments are saved, NUL-separated
+#   STUB_REPLY      the answer; empty means none
+#   STUB_STATUS     the result's status; default SUCCESS
+#   STUB_FINISHED_REASON  set, the result says the turn ended early for this reason
+#   STUB_SKIP_OPEN  a file in the folder that the stub doesn't open
+#   STUB_SLEEP      seconds to wait before the result, in a child process
+#   STUB_AGY_VERSION  what --version reports
+set -euo pipefail
+
+if [ "${1:-}" = --version ]; then echo "${STUB_AGY_VERSION:-1.4.12}"; exit 0; fi
+
+n=1
+while [ -e "$STUB_RECORD/agy.$n" ]; do n=$((n + 1)); done
+printf '%s\0' "$@" > "$STUB_RECORD/agy.$n"
+pwd > "$STUB_RECORD/agy.$n.cwd"
+ls -A > "$STUB_RECORD/agy.$n.files"
+# closed: at its end at once; open: nothing to read within a second; data: something to read.
+# bash 3.2's read -t can't tell the first two apart.
+perl -MIO::Select -e 'if (IO::Select->new(\*STDIN)->can_read(1)) { print sysread(STDIN, my $b, 1) ? "data" : "closed" }
+  else { print "open" }' > "$STUB_RECORD/agy.$n.stdin"
+
+jq -cn --arg cwd "$PWD" '{event: "init", conversation_id: "stub-conversation",
+  init: {model: "stub", cwd: $cwd, tools: [], permission_mode: "request-review"}}'
+for file in *; do
+  if [ ! -f "$file" ] || [ "$file" = "${STUB_SKIP_OPEN:-}" ]; then continue; fi
+  jq -cn --arg path "$PWD/$file" '{event: "step_update", step_update: {conversation_id: "stub-conversation",
+    step_index: 1, state: "DONE", step_type: "tool", tool_name: "read_file",
+    tool_info: {name: "read_file", parameters: {Path: $path}, output: "1 lines"}}}'
+done
+if [ -n "${STUB_SLEEP:-}" ]; then
+  sleep "$STUB_SLEEP" &
+  echo $! > "$STUB_RECORD/agy.child"
+  wait
+fi
+jq -cn --arg response "${STUB_REPLY-NOTHING TO REPORT}" --arg status "${STUB_STATUS:-SUCCESS}" \
+  --arg reason "${STUB_FINISHED_REASON:-}" '{event: "result", result: ({conversation_id: "stub-conversation",
+    status: $status, response: $response, duration_seconds: 1.5, num_turns: 1,
+    usage: {input_tokens: 100, output_tokens: 7, thinking_tokens: 3, cache_read_tokens: 40, total_tokens: 107}}
+    + (if $reason == "" then {} else {finished_reason: $reason} end))}'

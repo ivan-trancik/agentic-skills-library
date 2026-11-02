@@ -6,7 +6,9 @@ Skills for coding agents, shared by Claude Code and OpenAI Codex, installed once
 
 An agent should not grade its own work. The skills here make the two harnesses check each other: whichever one builds, the other reviews the plan before any code is written, the screenshots after a page changes, and the diff before the commit. The reviewer runs headless from the command line, reports only must-fix findings, and may not change the work. The user stays the judge of plans and designs. The code review loop runs without supervision and ends in a commit, never a push.
 
-The library stays small on purpose: six skills, one installer, one instruction block and their checks, all readable in one sitting.
+One skill reaches past the two harnesses. `ask-gemini` gives Gemini 4 Argon, a third model family, the jobs a Perplexity model council assigned it in November 2026: watching video and listening to audio, an independent second opinion on a decision that is costly to reverse, and, through the user, searching Gmail and Drive or asking a Gemini Notebook. Planning, coding and reviews stay with Claude and Codex.
+
+The library stays small on purpose: seven skills, one installer, one instruction block and their checks, all readable in one sitting.
 
 ## Status
 
@@ -23,6 +25,8 @@ The first [research cycle](research/README.md), in October 2026, compared the li
 
 Since then, each skill names its scripts relative to its own folder, and `./install.sh --check` reports whether the installed copies match this repository. The review loop now takes the CLIs' own review tests, gets its findings as JSON, has a second reviewer try to disprove them, keeps a ledger of every finding, and logs every round. The design review takes its screenshots with Playwright: the whole page in readable tiles, tablet, phone, dark mode and keyboard focus, a canary image that proves the reviewer saw them, and a Lighthouse accessibility audit. Only the reviewer sees those screenshots: the user gets the live page, opened in a browser tab and left running for them to try, in a Superset workspace through the `superset` CLI, checked on version 1.36.0. The Codex reviewer keeps the loop's own prompt rather than Codex's `review` command, which found one more bug in a two-case comparison but replies in a format the loop would have to parse; the prompt took over that command's rule not to stop at the first finding.
 
+In November 2026 `ask-gemini` added Gemini 4 Argon as a specialist, run headless through the Antigravity CLI, `agy` 1.4.12, on a Google AI Pro plan. Before it was built, a test showed Argon reading a short clip and naming its colours, their times and a spoken number correctly, and showed that it can't reach anything outside its own folder. Claude Code and Codex then each ran the installed skill on that clip from start to finish.
+
 ## The skills
 
 | Skill | What it does |
@@ -33,6 +37,7 @@ Since then, each skill names its scripts relative to its own folder, and `./inst
 | `save-review` | The reviewer writes its findings to `.local/review.md` for another agent |
 | `apply-review` | The builder fixes the findings it agrees with and asks the user about the rest |
 | `ship` | Checks, commit, take in the default branch, push, pull request, squash-merge; only when the user calls it by name |
+| `ask-gemini` | Gemini 4 Argon watches a video, listens to audio or gives an independent second opinion; for Gmail, Drive and a Gemini Notebook, a prompt the user runs in Google's apps |
 
 `instructions/` holds the default sequence for any task that adds or changes behaviour: plan, plan review, the user's go-ahead, build and the project's checks, design review where a page changed, the user's feedback, the code review loop, commit. Shipping only when the user calls `ship` by name: `/ship` in Claude Code, `$ship` in Codex.
 
@@ -62,6 +67,7 @@ Both locations are needed. Claude Code does not read `~/.agents/skills` itself b
 - An `AGENTS.md` that says how to run its checks, such as tests and a typecheck. The skills refer to "the project's checks" and look there. Claude Code reads a project `AGENTS.md` natively since version 2.1.277 when there is no `CLAUDE.md`; a `CLAUDE.md` containing `@AGENTS.md` still works.
 - A GitHub remote, for `ship`.
 - Google Chrome and Node.js, for `review-design`. Its scripts fetch Playwright 1.63.0 and Lighthouse 13.5.0 through `npx` on first use and drive the installed Chrome, so no browser is downloaded.
+- `agy`, the Antigravity CLI, signed in with a paid Google AI Pro account, for `ask-gemini`, and ffmpeg for its frame checks. Its runs count against the plan's weekly Argon allowance, whose size Google doesn't publish.
 
 Working files go in `.local/` in the project. The scripts add `.local/` to the repo's local git exclude list if the project doesn't ignore it.
 
@@ -76,6 +82,20 @@ Working files go in `.local/` in the project. The scripts add `.local/` to the r
 - `REVIEWER_TIMEOUT`, 480 seconds by default, is the reviewer's deadline. The script then stops the reviewer's whole process group, resumes a Codex reviewer once at `medium` effort for its findings so far, and stays within the builder's 10-minute command limit.
 - `--schema <file>` makes the reviewer reply with JSON that matches the schema: `--json-schema` for Claude, `--output-schema` for Codex. Every run leaves a record beside its output: the harness, the seconds it took, whether the deadline fired, and its cost or token counts.
 
+## How Gemini is run
+
+`skills/ask-gemini/scripts/ask.sh` runs Gemini 4 Argon with `agy -p` on the user's Google AI Pro plan, whichever agent builds. It writes Argon's answer only when the run succeeded and Argon opened every file it was given.
+
+- Argon works in a throwaway folder under `/tmp` that holds copies of the files and nothing else. On APFS the copies are clones, so a long video costs nothing to copy.
+- The session's `--settings` deny every file write, command, URL fetch and MCP call, and every read under `/Users`, `/Volumes` and the home folder. They also pin the `request-review` mode, in which headless `agy` refuses anything it would have to ask about, such as a read outside its folder. Such a refusal ends the turn without an answer. Web search stays open.
+- In a test on `agy` 1.4.12, the deny rules held with `toolPermission` set to `always-proceed`, but that setting let a read outside the folder through. Whether a session setting beats the global file is untested, so `ask.sh` won't run while `~/.gemini/antigravity-cli/settings.json` says `always-proceed`.
+- The stream shows every file Argon opened, with its path, and a file it didn't open fails the run.
+- `GEMINI_TIMEOUT`, 480 seconds by default, is the deadline. `agy`'s own `--print-timeout` ends 30 seconds sooner, so a slow answer comes back marked as cut off. Each run leaves a record beside its answer: the model, seconds, status, tokens and conversation.
+- `GEMINI_MODEL` overrides the model, which is `gemini-4-argon-medium` for video and audio and `gemini-4-argon-high` for second opinions. In one test, a minute of video with sound took about 8,000 input tokens.
+- `agy` samples video at about one frame a second and has no setting to change that. For a fast moment, the skill cuts a few seconds and slows them down with ffmpeg, so that Argon sees more frames for each real second. In a test with two 0.3-second flashes, Argon could place each only within two seconds at normal speed, and within a quarter of a second once the part was slowed four times.
+- From Codex, `ask.sh` runs inside the `workspace-write` sandbox when that sandbox has network access, and outside it otherwise. The sign-in in the keychain works from inside.
+- `agy` updates itself whenever it runs, even for `--version`, so its version moves on its own. `tests/live.sh gemini` checks the behaviour above against whatever version is installed.
+
 ## The review log
 
 `review-loop` appends one line per round to `~/.local/state/agentic-skills-library/review-loop.jsonl`, which outlives the workspace: the repository and branch, how many findings were reported, refuted, accepted, rejected and disputed, how many lay in lines the previous fixes changed, the size of the work, the round's time and cost, and how the loop ended. For example:
@@ -85,6 +105,13 @@ log=~/.local/state/agentic-skills-library/review-loop.jsonl
 jq -s 'map(select(.exit)) | group_by(.exit) | map({exit: .[0].exit, loops: length})' "$log"   # how loops end
 jq -s '{reported: (map(.reported) | add), refuted: (map(.refuted) | add), accepted: (map(.accepted) | add)}' "$log"
 jq -s 'map(select(.round > 1)) | {later_findings: (map(.reported) | add), in_previous_fix: (map(.in_previous_fix // 0) | add)}' "$log"
+```
+
+`ask-gemini` keeps a log of its own beside it, `ask-gemini.jsonl`, with one line per job: the job, whether Argon ran headless or in Google's app, whether it found something the builder had missed, and how many of its claims had to be corrected. After a month, that shows whether Argon earns its place:
+
+```bash
+jq -s 'group_by(.job) | map({job: .[0].job, uses: length, added: (map(select(.added)) | length),
+  corrections: (map(.corrections) | add)})' ~/.local/state/agentic-skills-library/ask-gemini.jsonl
 ```
 
 ## Research

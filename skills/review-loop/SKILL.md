@@ -9,6 +9,8 @@ The user asking for this skill is permission to commit when the loop ends clean,
 
 `${CLAUDE_SKILL_DIR}` in the commands below stands for this skill's folder, the one that holds this file. Run every command from the repository root.
 
+If the user asked for the review at maximum strength, put `REVIEWER_STRENGTH=max` in front of every `reviewer.sh` and `refute.sh` command below. The reviewer then runs on the strongest model and effort its harness offers.
+
 ## Before the first round
 
 1. Run the project's checks (see `AGENTS.md`) and fix any failure.

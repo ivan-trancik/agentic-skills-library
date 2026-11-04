@@ -3,6 +3,7 @@
 # prints a result shaped like `--output-format json`, without calling a model.
 #
 #   STUB_RECORD  folder where each call's arguments are saved, NUL-separated
+#                and claude.N.env holds the CLAUDE_CODE_EFFORT_LEVEL it was given
 #   STUB_REPLY   the result text, or with --json-schema the structured output,
 #                which defaults to a passing review
 #   STUB_ERROR   when set, the run reports an error instead of a result
@@ -15,6 +16,7 @@ if [ "${1:-}" = --version ]; then echo "${STUB_CLAUDE_VERSION:-2.1.294} (Claude 
 n=1
 while [ -e "$STUB_RECORD/claude.$n" ]; do n=$((n + 1)); done
 printf '%s\0' "$@" > "$STUB_RECORD/claude.$n"
+printf 'CLAUDE_CODE_EFFORT_LEVEL=%s\n' "${CLAUDE_CODE_EFFORT_LEVEL-unset}" > "$STUB_RECORD/claude.$n.env"
 
 if [ -n "${STUB_SLEEP:-}" ]; then
   sleep "$STUB_SLEEP" &

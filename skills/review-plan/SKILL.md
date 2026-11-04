@@ -7,6 +7,8 @@ Have the other coding agent review your plan before any code is written. This is
 
 `${CLAUDE_SKILL_DIR}` in the commands below stands for this skill's folder, the one that holds this file.
 
+If the user asked for the review at maximum strength, put `REVIEWER_STRENGTH=max` in front of the `reviewer.sh` command below. The reviewer then runs on the strongest model and effort its harness offers.
+
 1. Write the plan to `.local/plan.md`. Start it with the user's request, word for word. Then give what you will build, the files you expect to touch, the choices the user has to make with your recommendation for each, and how you will check the result.
 2. Run the reviewer from the repository root, in the foreground with a 10-minute timeout. The script keeps the reviewer read-only and stops it if it runs past eight minutes. Pass `codex` if you are Claude Code and `claude` if you are Codex:
 

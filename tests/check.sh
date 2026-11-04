@@ -55,7 +55,7 @@ cat > "$tmp/home/.claude/settings.json" <<'EOF'
  "permissions": {"allow": ["Bash", "Edit", "Write"]}, "hooks": {"Stop": []}}
 EOF
 export STUB_RECORD="$tmp/calls" HOME="$tmp/home"
-unset CLAUDE_CONFIG_DIR REVIEWER_EFFORT REVIEWER_TIMEOUT
+unset CLAUDE_CONFIG_DIR REVIEWER_EFFORT REVIEWER_TIMEOUT REVIEWER_STRENGTH REVIEWER_MODEL CLAUDE_CODE_EFFORT_LEVEL
 
 # Runs reviewer.sh in the test repository with the stubs first on PATH.
 review() {
@@ -86,6 +86,7 @@ review codex "$tmp/prompt.md" .local/out.md .local/shot.png
 has codex.1 exec -s read-only --json -o "$out" || fail "codex read-only launch"
 has codex.1 "--image=$repo/.local/shot.png" || fail "codex screenshot path"
 if mentions codex.1 model_reasoning_effort; then fail "codex effort set without REVIEWER_EFFORT"; fi
+if has codex.1 -m; then fail "codex model set without REVIEWER_MODEL"; fi
 [ "$(cat "$out")" = "NO MUST-FIX FINDINGS" ] || fail "codex reply"
 echo "ok - codex reviewer, read-only"
 
@@ -112,6 +113,9 @@ has claude.1 --settings '{"model":"opus","modelSettings":{"claude-opus-5-5":{"ef
   || fail "claude user model settings"
 if mentions claude.1 Bash; then fail "claude read-only launch mentions Bash"; fi
 if mentions claude.1 --effort; then fail "claude effort set without REVIEWER_EFFORT"; fi
+if mentions claude.1 --model; then fail "claude model set without REVIEWER_MODEL"; fi
+has claude.1 --max-budget-usd 5 || fail "claude budget"
+[ "$(cat "$STUB_RECORD/claude.1.env")" = "CLAUDE_CODE_EFFORT_LEVEL=unset" ] || fail "claude effort variable set without an effort"
 mentions claude.1 "$repo/.local/shot.png" || fail "claude screenshot path"
 [ "$(cat "$out")" = "NO MUST-FIX FINDINGS" ] || fail "claude reply"
 echo "ok - claude reviewer, read-only"
@@ -123,6 +127,7 @@ has claude.1 --allowedTools "Bash(npm test)" "Bash(make lint)" || fail "claude c
 if mentions claude.1 '*'; then fail "claude rule with a wildcard"; fi
 grep -qF 'skipped a check with a *' "$tmp/stderr" || fail "no warning for the skipped check"
 has claude.1 --effort high || fail "claude REVIEWER_EFFORT"
+[ "$(cat "$STUB_RECORD/claude.1.env")" = "CLAUDE_CODE_EFFORT_LEVEL=high" ] || fail "claude REVIEWER_EFFORT not in the environment"
 echo "ok - claude reviewer, --run-checks"
 
 if STUB_SLEEP=30 REVIEWER_TIMEOUT=2 review claude "$tmp/prompt.md" .local/out.md 2> /dev/null; then
@@ -159,6 +164,41 @@ jq -e '.deadline == true and .tokens == {input: 200, cached: 80, output: 14}' "$
   || fail "the run record doesn't add up both turns: $(cat "$record")"
 if review --schema "$tmp/none.json" codex "$tmp/prompt.md" .local/out.json 2> /dev/null; then fail "a missing schema accepted"; fi
 echo "ok - --schema and run records"
+
+# REVIEWER_STRENGTH=max runs each reviewer on the strongest model and effort
+# its harness offers, an explicit REVIEWER_MODEL or REVIEWER_EFFORT beats the
+# pin, and the run record says what was asked for.
+REVIEWER_STRENGTH=max review codex "$tmp/prompt.md" .local/out.md
+has codex.1 -m gpt-6-astra || fail "codex max model"
+has codex.1 -c model_reasoning_effort=max || fail "codex max effort"
+jq -e '.strength == "max" and .model == "gpt-6-astra" and .effort == "max"' "$record" > /dev/null \
+  || fail "codex max run record: $(cat "$record")"
+REVIEWER_STRENGTH=max REVIEWER_MODEL=gpt-6.1-sol REVIEWER_EFFORT=ultra review codex "$tmp/prompt.md" .local/out.md
+has codex.1 -m gpt-6.1-sol || fail "REVIEWER_MODEL doesn't beat the pin"
+has codex.1 -c model_reasoning_effort=ultra || fail "REVIEWER_EFFORT doesn't beat the pin"
+REVIEWER_MODEL=gpt-6.1-sol review codex "$tmp/prompt.md" .local/out.md
+has codex.1 -m gpt-6.1-sol || fail "codex REVIEWER_MODEL"
+if mentions codex.1 model_reasoning_effort; then fail "codex effort set by REVIEWER_MODEL"; fi
+jq -e '.strength == "default" and .model == "gpt-6.1-sol" and .effort == null' "$record" > /dev/null \
+  || fail "codex run record with REVIEWER_MODEL: $(cat "$record")"
+STUB_SLEEP=30 REVIEWER_TIMEOUT=2 REVIEWER_STRENGTH=max review codex "$tmp/prompt.md" .local/out.md 2> /dev/null
+has codex.2 resume stub-thread -m gpt-6-astra -c model_reasoning_effort=medium \
+  || fail "codex resume at max strength doesn't keep the model and drop to medium"
+REVIEWER_STRENGTH=max review claude "$tmp/prompt.md" .local/out.md
+has claude.1 --model best || fail "claude max model"
+has claude.1 --effort max || fail "claude max effort"
+has claude.1 --max-budget-usd 20 || fail "claude max budget"
+has claude.1 --settings '{"model":"opus","modelSettings":{"claude-opus-5-5":{"effortLevel":"xhigh"}}}' \
+  || fail "claude max strength drops the user settings"
+[ "$(cat "$STUB_RECORD/claude.1.env")" = "CLAUDE_CODE_EFFORT_LEVEL=max" ] || fail "claude max effort not in the environment"
+jq -e '.strength == "max" and .model == "best" and .effort == "max"' "$record" > /dev/null \
+  || fail "claude max run record: $(cat "$record")"
+CLAUDE_CODE_EFFORT_LEVEL=low REVIEWER_EFFORT=high review claude "$tmp/prompt.md" .local/out.md
+[ "$(cat "$STUB_RECORD/claude.1.env")" = "CLAUDE_CODE_EFFORT_LEVEL=high" ] || fail "an inherited effort variable beats REVIEWER_EFFORT"
+CLAUDE_CODE_EFFORT_LEVEL=low review claude "$tmp/prompt.md" .local/out.md
+[ "$(cat "$STUB_RECORD/claude.1.env")" = "CLAUDE_CODE_EFFORT_LEVEL=low" ] || fail "the reviewer changed an inherited effort variable although it was given no effort"
+if REVIEWER_STRENGTH=most review codex "$tmp/prompt.md" .local/out.md 2> /dev/null; then fail "REVIEWER_STRENGTH=most accepted"; fi
+echo "ok - REVIEWER_STRENGTH, REVIEWER_MODEL and REVIEWER_EFFORT"
 
 echo OLD > "$out"
 if STUB_REPLY='' review codex "$tmp/prompt.md" .local/out.md 2> /dev/null; then
@@ -280,7 +320,7 @@ cat > "$logged/.local/review-round-2.json" <<EOF
   {"file": "added.txt", "line": 2, "summary": "s", "failure_scenario": "f", "confidence": "plausible"}]}
 EOF
 run_record() { # run_record <name> <finished> <seconds> <input tokens> <cached tokens>
-  printf '{"harness": "codex", "checks": true, "seconds": %s, "finished": %s, "deadline": false, "cost_usd": null, "tokens": {"input": %s, "cached": %s, "output": 1}}\n' \
+  printf '{"harness": "codex", "checks": true, "strength": "max", "model": "gpt-6-astra", "effort": "max", "seconds": %s, "finished": %s, "deadline": false, "cost_usd": null, "tokens": {"input": %s, "cached": %s, "output": 1}}\n' \
     "$3" "$2" "$4" "$5" > "$logged/.local/review-round-2$1.run.json"
 }
 run_record "" 1000 30 100 40
@@ -294,10 +334,12 @@ log_round --round 2 --reported 4 --refuted 1 --accepted 1 --rejected 1 --dispute
 line="$(tail -n 1 "$tmp/state/agentic-skills-library/review-loop.jsonl")"
 jq -e '.round == 2 and .reported == 4 and .refuted == 1 and .accepted == 1 and .rejected == 1 and .disputed == 0
   and .in_previous_fix == 3 and .lines == 6 and .exit == "clean" and .reviewer == "codex"
+  and .strength == "max" and .model == "gpt-6-astra" and .effort == "max"
   and .seconds == 52 and .cost_usd == null and .tokens == {input: 170, cached: 50, output: 4}' <<< "$line" > /dev/null \
   || fail "log-round.sh wrote $line"
 log_round --round 1 --reported 0 --refuted 0 --accepted 0 --rejected 0 --disputed 0 > /dev/null
-jq -e '.round == 1 and .in_previous_fix == null and .exit == null and .seconds == 0' \
+jq -e '.round == 1 and .in_previous_fix == null and .exit == null and .seconds == 0
+  and .strength == null and .model == null and .effort == null' \
   <<< "$(tail -n 1 "$tmp/state/agentic-skills-library/review-loop.jsonl")" > /dev/null || fail "log-round.sh without records"
 if log_round --round 1 --reported x 2> /dev/null; then fail "log-round.sh accepted a bad count"; fi
 # The outer repository's submodule still can't be snapshotted, so state.sh fails there.

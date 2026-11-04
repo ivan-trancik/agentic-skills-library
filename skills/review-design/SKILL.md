@@ -7,6 +7,8 @@ Have the other coding agent review the page you changed, from screenshots, then 
 
 `${CLAUDE_SKILL_DIR}` in the commands below stands for this skill's folder, the one that holds this file.
 
+If the user asked for the review at maximum strength, put `REVIEWER_STRENGTH=max` in front of the `reviewer.sh` command below. The reviewer then runs on the strongest model and effort its harness offers.
+
 1. Start the app the way `AGENTS.md` says, and make sure it shows realistic data. It has to keep running after your turn ends, so that the user can try the page. In a Superset workspace, which sets `$SUPERSET_WORKSPACE_ID`, run it in a terminal of the workspace: the terminal outlives your turn, and the user can watch its log. There `./.superset/run.sh` starts the app on the workspace's own port. Note the `terminalId` the first command prints; the second shows the terminal's screen, with the address the app serves:
 
    ```

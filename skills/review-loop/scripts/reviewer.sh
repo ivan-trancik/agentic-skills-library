@@ -6,8 +6,9 @@
 # Pass `codex` if you are Claude Code and `claude` if you are Codex. Relative
 # paths are taken from the repository root. The log goes next to the output
 # file, with a .log extension, and so does a record of the run, with a
-# .run.json extension: the harness, whether checks were allowed, the seconds
-# it took, when it finished, whether the deadline fired, and its cost or token counts.
+# .run.json extension: the harness, whether checks were allowed, the strength,
+# the model and effort asked for, the seconds it took, when it finished,
+# whether the deadline fired, and its cost or token counts.
 #
 # With --schema, the reviewer must reply with JSON that matches the schema in
 # that file, and the output file holds that JSON.
@@ -19,8 +20,13 @@
 # reviewer then runs in a sandbox that can write in the repository, so in that
 # mode state.sh's fingerprint is what catches a change to the work.
 #
-#   REVIEWER_EFFORT   reasoning effort; unset, each harness uses its own setting
-#   REVIEWER_TIMEOUT  seconds before the reviewer is stopped; default 480
+#   REVIEWER_STRENGTH  default, or max for the strongest model and effort the
+#                      reviewer's harness offers
+#   REVIEWER_MODEL     the reviewer's model, named as its CLI names it; unset,
+#                      the strength's pin, or the harness's own setting
+#   REVIEWER_EFFORT    reasoning effort; unset, the strength's pin, or the
+#                      harness's own setting
+#   REVIEWER_TIMEOUT   seconds before the reviewer is stopped; default 480
 set -euo pipefail
 
 usage="usage: $0 [--run-checks] [--schema <file>] <codex|claude> <prompt-file> <output-file> [image ...]"
@@ -45,6 +51,28 @@ if ! [ "$timeout" -gt 0 ] 2>/dev/null; then
   echo "REVIEWER_TIMEOUT must be a whole number of seconds, at least 1" >&2
   exit 2
 fi
+
+# What max strength means for each harness, checked on Claude Code 2.1.318 and
+# Codex 0.166.0 in November 2026; `tests/live.sh strength` checks the pins
+# against the installed CLIs. `best` is Claude Code's alias for Fable where the
+# account has it and Opus otherwise, and `max` is an effort no settings key can
+# set. gpt-6-astra is the model `codex debug models` describes as frontier
+# intelligence for the most demanding work; its `ultra` level adds task
+# delegation, which a reviewer on a deadline can't use, so the effort is `max`.
+max_claude_model=best
+max_claude_effort=max
+max_codex_model=gpt-6-astra
+max_codex_effort=max
+
+strength="${REVIEWER_STRENGTH:-default}"
+case "$strength" in
+  default|max) ;;
+  *) echo "REVIEWER_STRENGTH must be default or max, not '$strength'" >&2; exit 2 ;;
+esac
+# The model and effort asked for. An explicit variable beats the strength's
+# pin, which the run functions fill in, and empty leaves the harness's own
+# setting in force.
+model="${REVIEWER_MODEL:-}" effort="${REVIEWER_EFFORT:-}"
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -118,12 +146,14 @@ user_model_settings() {
 run_codex() {
   local sandbox=read-only status=0 session image
   if [ "$run_checks" = 1 ]; then sandbox=workspace-write; fi
-  local args=(exec -s "$sandbox" --json -o "$out") schema_args=()
+  if [ "$strength" = max ]; then model="${model:-$max_codex_model}" effort="${effort:-$max_codex_effort}"; fi
+  local args=(exec -s "$sandbox" --json -o "$out") model_args=() schema_args=()
+  if [ -n "$model" ]; then model_args=(-m "$model"); fi
+  if [ -n "$effort" ]; then args+=(-c "model_reasoning_effort=$effort"); fi
   if [ -n "$schema" ]; then schema_args=(--output-schema "$schema"); fi
-  if [ -n "${REVIEWER_EFFORT:-}" ]; then args+=(-c "model_reasoning_effort=$REVIEWER_EFFORT"); fi
   for image in ${images[@]+"${images[@]}"}; do args+=("--image=$image"); done
-  with_deadline "$timeout" codex "${args[@]}" ${schema_args[@]+"${schema_args[@]}"} "$prompt" \
-    < /dev/null >> "$log" 2>&1 || status=$?
+  with_deadline "$timeout" codex "${args[@]}" ${model_args[@]+"${model_args[@]}"} \
+    ${schema_args[@]+"${schema_args[@]}"} "$prompt" < /dev/null >> "$log" 2>&1 || status=$?
 
   if [ "$status" -eq 124 ]; then
     # Out of time: resume the session once and ask for what it has.
@@ -132,7 +162,7 @@ run_codex() {
     session="$(jq -rnR 'first(inputs | fromjson? | objects
       | select(.type == "thread.started") | .thread_id)' "$log")"
     if [ -n "$session" ]; then
-      with_deadline 90 codex exec -s "$sandbox" resume "$session" \
+      with_deadline 90 codex exec -s "$sandbox" resume "$session" ${model_args[@]+"${model_args[@]}"} \
         -c model_reasoning_effort=medium --json -o "$out" ${schema_args[@]+"${schema_args[@]}"} \
         "Your time is up. Reply now with your complete findings so far, in the format you were asked for." \
         < /dev/null >> "$log" 2>&1 || true
@@ -144,7 +174,12 @@ run_codex() {
 }
 
 run_claude() {
-  local tools="Read,Grep,Glob" rules=() status=0 check json
+  local tools="Read,Grep,Glob" rules=() status=0 check json budget=5
+  if [ "$strength" = max ]; then
+    model="${model:-$max_claude_model}" effort="${effort:-$max_claude_effort}"
+    # A max-effort review of a large diff on Fable can pass the usual cap.
+    budget=20
+  fi
   if [ "$run_checks" = 1 ]; then
     tools="Read,Grep,Glob,Bash"
     if [ -f .local/review-checks ]; then
@@ -166,12 +201,18 @@ run_claude() {
   fi
 
   local args=(-p "$prompt" --restricted --safe-mode --strict-mcp-config --no-session-persistence
-    --permission-mode dontAsk --permission-prompts none --max-budget-usd 5
+    --permission-mode dontAsk --permission-prompts none --max-budget-usd "$budget"
     --output-format json --tools "$tools")
   local settings
   settings="$(user_model_settings)"
   if [ -n "$settings" ]; then args+=(--settings "$settings"); fi
-  if [ -n "${REVIEWER_EFFORT:-}" ]; then args+=(--effort "$REVIEWER_EFFORT"); fi
+  if [ -n "$model" ]; then args+=(--model "$model"); fi
+  if [ -n "$effort" ]; then
+    args+=(--effort "$effort")
+    # In Claude Code the variable outranks the flag, and the builder's
+    # environment may carry one.
+    export CLAUDE_CODE_EFFORT_LEVEL="$effort"
+  fi
   if [ -n "$schema" ]; then args+=(--json-schema "$(cat "$schema")"); fi
   if [ ${#rules[@]} -gt 0 ]; then args+=(--allowedTools "${rules[@]}"); fi
 
@@ -207,10 +248,12 @@ case "$agent" in
     ;;
 esac
 jq -n --arg harness "$agent" --argjson checks "$([ "$run_checks" = 1 ] && echo true || echo false)" \
+  --arg strength "$strength" --arg model "$model" --arg effort "$effort" \
   --argjson seconds "$(( $(date +%s) - started ))" --argjson finished "$(date +%s)" --argjson deadline "$deadline" \
   --argjson cost "$cost" --argjson tokens "$tokens" \
-  '{harness: $harness, checks: $checks, seconds: $seconds, finished: $finished, deadline: $deadline,
-    cost_usd: $cost, tokens: $tokens}' \
+  '{harness: $harness, checks: $checks, strength: $strength,
+    model: (if $model == "" then null else $model end), effort: (if $effort == "" then null else $effort end),
+    seconds: $seconds, finished: $finished, deadline: $deadline, cost_usd: $cost, tokens: $tokens}' \
   > "$record"
 
 if [ ! -s "$out" ]; then

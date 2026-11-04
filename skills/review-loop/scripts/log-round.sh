@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Appends one line about a review round to a log that outlives the workspace:
-# what the round found and what became of it, its time and cost, and how many
-# of its findings lie in lines that the previous fixes changed.
+# what the round found and what became of it, the strength, model and effort
+# its reviewer ran at, its time and cost, and how many of its findings lie in
+# lines that the previous fixes changed.
 #
 #   log-round.sh --round N --reported N --refuted N --accepted N --rejected N --disputed N
 #                [--before <fingerprint> --after <fingerprint>] [--exit <name>]
@@ -51,10 +52,11 @@ if state="$("$here/state.sh" 2> /dev/null)"; then lines="${state#lines=}"; lines
 shopt -s nullglob
 review=".local/review-round-$round.run.json"
 followers=(.local/review-round-"$round".*.run.json)
-totals='{"reviewer": null, "seconds": 0, "cost_usd": null, "tokens": null}'
+totals='{"reviewer": null, "strength": null, "model": null, "effort": null, "seconds": 0, "cost_usd": null, "tokens": null}'
 if [ -f "$review" ]; then
   totals="$(jq -cs '.[0].finished as $start | [.[0]] + (.[1:] | map(select(.finished >= $start)))
-    | {reviewer: .[0].harness, seconds: (map(.seconds) | add),
+    | {reviewer: .[0].harness, strength: (.[0].strength // null), model: (.[0].model // null),
+       effort: (.[0].effort // null), seconds: (map(.seconds) | add),
        cost_usd: (map(.cost_usd | numbers) | if length == 0 then null else add end),
        tokens: (map(.tokens | objects) | if length == 0 then null
          else {input: (map(.input) | add), cached: (map(.cached) | add), output: (map(.output) | add)} end)}' \

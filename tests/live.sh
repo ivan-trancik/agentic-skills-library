@@ -10,7 +10,7 @@
 #   tests/live.sh [section ...]
 #
 # Sections, in the order they run: claude, codex, deadline, ship, paths, findings,
-# refute, weakened, design, gemini, cost.
+# refute, weakened, design, gemini, strength, cost.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,6 +28,7 @@ wanted() {
 
 # Unset, the Superset wrappers don't report these runs as the workspace's agent.
 unset SUPERSET_TERMINAL_ID SUPERSET_TAB_ID SUPERSET_PANE_ID REVIEWER_EFFORT REVIEWER_TIMEOUT
+unset REVIEWER_STRENGTH REVIEWER_MODEL CLAUDE_CODE_EFFORT_LEVEL
 
 check() {
   local name="$1"
@@ -424,6 +425,44 @@ printf 'Read the file %s and quote it.\n' "$tmp/elsewhere.txt" > "$probe/elsewhe
 check "it couldn't read the secret elsewhere" lacks "$secret" "$probe/.local/elsewhere.log" "$tmp/elsewhere.err"
 check "the refused read left no answer" [ ! -e "$probe/.local/elsewhere.md" ]
 rm -rf "$sentinels"
+fi
+
+if wanted strength; then
+echo "Maximum strength"
+# The pins at the top of reviewer.sh.
+pin() { sed -n "s/^max_$1=//p" "$reviewer"; }
+codex_lists() { codex debug models | jq -e --arg m "$1" --arg e "$2" \
+  '.models | any(.slug == $m and ([.supported_reasoning_levels[].effort] | index($e) != null))' > /dev/null; }
+# The model and effort a Codex session ran at, from the session record its log names.
+codex_turn() {
+  local id file
+  id="$(jq -rnR 'first(inputs | fromjson? | objects | select(.type == "thread.started") | .thread_id)' "$1")"
+  file="$(find "$HOME/.codex/sessions" ${CODEX_HOME:+"$CODEX_HOME/sessions"} -name "*$id.jsonl" 2>/dev/null | sed -n 1p)"
+  if [ -n "$id" ] && [ -n "$file" ]; then
+    jq -r 'select(.type == "turn_context") | .payload
+      | "\(.model) \(.collaboration_mode.settings.reasoning_effort // "default")"' "$file" | sed -n 1p
+  fi
+}
+echo "Reply with the single word OK." > "$tmp/ok-prompt.md"
+check "codex debug models lists $(pin codex_model) with the effort $(pin codex_effort)" \
+  codex_lists "$(pin codex_model)" "$(pin codex_effort)"
+in_repo env REVIEWER_STRENGTH=max "$reviewer" codex "$tmp/ok-prompt.md" .local/strength-codex.md || true
+check "Codex replied" replied strength-codex.md
+turn="$(codex_turn "$repo/.local/strength-codex.log")"
+check "Codex ran on $(pin codex_model) at $(pin codex_effort) (it ran on ${turn:-unknown})" \
+  [ "$turn" = "$(pin codex_model) $(pin codex_effort)" ]
+check "the Codex run record says so" json_has \
+  ".strength == \"max\" and .model == \"$(pin codex_model)\" and .effort == \"$(pin codex_effort)\"" \
+  "$repo/.local/strength-codex.run.json"
+in_repo env REVIEWER_STRENGTH=max "$reviewer" claude "$tmp/ok-prompt.md" .local/strength-claude.md || true
+check "Claude replied" replied strength-claude.md
+# `best` is Fable where the account has it and Opus otherwise, so either counts.
+best_model="$(result_of "$repo/.local/strength-claude.log" \
+  | jq -r '.modelUsage // {} | keys | map(select(test("fable|opus"))) | first // empty')"
+check "Claude ran on the model best resolves to (${best_model:-none})" [ -n "$best_model" ]
+check "the Claude run record says so" json_has \
+  ".strength == \"max\" and .model == \"$(pin claude_model)\" and .effort == \"$(pin claude_effort)\"" \
+  "$repo/.local/strength-claude.run.json"
 fi
 
 if wanted cost; then

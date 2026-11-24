@@ -500,9 +500,9 @@ installer > /dev/null 2>&1 || fail "install"
   || fail "the shared runner is not installed as a file of its own"
 cmp -s "$installed/review-plan/scripts/reviewer.sh" "$here/skills/review-loop/scripts/reviewer.sh" \
   || fail "the installed runner differs from its source"
-grep -qF "managed copy of $(git -C "$copy" rev-parse --short HEAD)" "$installed/ship/SKILL.md" \
+grep -qF "managed copy of $(git -C "$copy" rev-parse --short HEAD)" "$installed/land/SKILL.md" \
   || fail "the marker doesn't name the commit"
-[ "$(readlink "$home/.claude/skills/ship")" = "$installed/ship" ] || fail "no Claude Code link"
+[ "$(readlink "$home/.claude/skills/land")" = "$installed/land" ] || fail "no Claude Code link"
 grep -qF 'agentic-skills-library:start' "$home/.codex/AGENTS.md" || fail "no instruction block"
 installer --check > "$tmp/check.out" 2>&1 || fail "--check right after install: $(cat "$tmp/check.out")"
 [ "$(grep -c ': current$' "$tmp/check.out")" = 9 ] || fail "--check doesn't report all seven skills and both blocks current"
@@ -514,19 +514,47 @@ grep -q '^note: codex is 0.999.0, but the skills were last verified on 0.160.1' 
 echo 'edited' >> "$installed/review-loop/reviewer-prompt.md"
 chmod -x "$installed/review-plan/scripts/reviewer.sh"
 rm -rf "$installed/save-review"
-mkdir -p "$home/.codex/skills/ship"
+mkdir -p "$home/.codex/skills/land"
 if installer --check > "$tmp/check.out" 2>&1; then fail "--check passes a changed install"; fi
 grep -qx 'review-loop: changed' "$tmp/check.out" || fail "--check misses a changed file"
 grep -qx 'review-plan: changed' "$tmp/check.out" || fail "--check misses a script that lost its execute bit"
 grep -qx 'save-review: missing' "$tmp/check.out" || fail "--check misses a missing skill"
-grep -q 'warning: .*/.codex/skills/ship also exists' "$tmp/check.out" || fail "no warning for a shadowing skill"
+grep -q 'warning: .*/.codex/skills/land also exists' "$tmp/check.out" || fail "no warning for a shadowing skill"
 
 installer > /dev/null 2>&1 || fail "reinstall"
 installer --check > /dev/null 2>&1 || fail "reinstall doesn't restore the copies"
 installer --uninstall > /dev/null 2>&1
-[ ! -e "$installed/ship" ] && [ ! -e "$home/.claude/skills/ship" ] || fail "uninstall leaves a skill"
+[ ! -e "$installed/land" ] && [ ! -e "$home/.claude/skills/land" ] || fail "uninstall leaves a skill"
 if grep -qF 'agentic-skills-library:start' "$home/.claude/CLAUDE.md"; then fail "uninstall leaves the block"; fi
-[ -d "$home/.codex/skills/ship" ] || fail "uninstall removed a skill it doesn't own"
+[ -d "$home/.codex/skills/land" ] || fail "uninstall removed a skill it doesn't own"
+
+# ship is retired: a marked copy left by an older install goes, anything else stays.
+plant_retired() {
+  mkdir -p "$installed/ship" "$home/.claude/skills"
+  printf -- '---\nname: ship\n---\n<!-- agentic-skills-library: managed copy of old -->\n' > "$installed/ship/SKILL.md"
+  ln -sfn "$installed/ship" "$home/.claude/skills/ship"
+}
+retired_gone() { [ ! -e "$installed/ship" ] && [ ! -L "$home/.claude/skills/ship" ]; }
+installer > /dev/null 2>&1 || fail "install before the retired-skill cases"
+plant_retired
+if installer --check > "$tmp/check.out" 2>&1; then fail "--check passes a stale retired skill"; fi
+grep -q '^ship: stale' "$tmp/check.out" || fail "--check doesn't report a stale retired skill"
+installer > /dev/null 2>&1 || fail "install over a stale retired skill"
+retired_gone || fail "install leaves a retired skill"
+installer --check > /dev/null 2>&1 || fail "--check fails once the retired skill is gone"
+plant_retired
+installer --uninstall > /dev/null 2>&1
+retired_gone || fail "uninstall leaves a retired skill"
+plant_retired
+ln -sfn "$tmp/elsewhere" "$home/.claude/skills/ship"
+installer > /dev/null 2>&1 || fail "install over a retired skill whose link points elsewhere"
+[ ! -e "$installed/ship" ] || fail "install leaves a retired skill whose link points elsewhere"
+[ "$(readlink "$home/.claude/skills/ship")" = "$tmp/elsewhere" ] || fail "install removed a link pointing elsewhere"
+mkdir -p "$installed/ship" && echo 'not ours' > "$installed/ship/SKILL.md"
+installer > /dev/null 2>&1 || fail "install beside an unmarked retired name"
+installer --uninstall > /dev/null 2>&1
+[ -f "$installed/ship/SKILL.md" ] || fail "an unmarked skill under a retired name was removed"
+[ "$(readlink "$home/.claude/skills/ship")" = "$tmp/elsewhere" ] || fail "a link pointing elsewhere was removed"
 echo "ok - install.sh"
 
 echo "all checks passed"

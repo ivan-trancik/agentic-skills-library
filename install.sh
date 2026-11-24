@@ -11,6 +11,12 @@
 # from. Install refuses to replace a same-name skill that has no marker, and
 # uninstall removes only marked copies and the marked block. Edit the source
 # here and reinstall; edits made to the installed copies are overwritten.
+#
+# A skill that is renamed or dropped goes into retired_skills, so that install
+# and uninstall remove its marked copy and --check reports one left behind.
+# Retired skills are named rather than inferred from what this checkout lacks,
+# because the marker doesn't say which checkout installed a copy: an install
+# from an older worktree would otherwise delete a newer branch's skill.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -24,6 +30,8 @@ agents_dir="$HOME/.agents/skills"       # read by Codex
 claude_dir="$HOME/.claude/skills"       # read by Claude Code
 codex_dir="$HOME/.codex/skills"         # also read by Codex, so a same-name skill there shadows ours
 instruction_files=("$HOME/.claude/CLAUDE.md" "$HOME/.codex/AGENTS.md")
+# ship became land when Claude Code 2.1.331 reserved /ship for a built-in command.
+retired_skills="ship"  # space-separated, so an empty list is safe under set -u on bash 3.2
 
 managed() { [ -f "$1/SKILL.md" ] && grep -qF "$marker_prefix" "$1/SKILL.md"; }
 
@@ -65,6 +73,16 @@ uninstall_skill() {
     if managed "$target"; then rm -rf "$target"; echo "removed $name"
     else echo "left $target alone: it is not a copy made by this script" >&2; fi
   fi
+}
+
+# Removes the marked copy of a retired skill, and its link if it points there.
+# Anything else under that name is left alone, without a word: it isn't ours.
+remove_retired() {
+  local name="$1" target="$agents_dir/$1" link="$claude_dir/$1"
+  managed "$target" || return 0
+  if [ -L "$link" ] && [ "$(readlink "$link")" = "$target" ]; then rm "$link"; fi
+  rm -rf "$target"
+  echo "removed $name, which this repository no longer has"
 }
 
 # Prints current, changed, missing or "not ours" for an installed skill. The
@@ -143,6 +161,7 @@ version_notes() {
 case "${1:-install}" in
   install)
     status=0
+    for name in $retired_skills; do remove_retired "$name"; done
     for src in "$here"/skills/*/; do install_skill "${src%/}" || status=1; done
     for file in "${instruction_files[@]}"; do install_block "$file"; done
     exit "$status"
@@ -155,6 +174,12 @@ case "${1:-install}" in
       if [ "$state" != current ]; then status=1; fi
       warn_shadow "$(basename "$src")"
     done
+    for name in $retired_skills; do
+      if managed "$agents_dir/$name"; then
+        echo "$name: stale, a retired skill that ./install.sh removes"
+        status=1
+      fi
+    done
     for file in "${instruction_files[@]}"; do
       state="$(block_state "$file")"
       echo "instruction block in $file: $state"
@@ -165,6 +190,7 @@ case "${1:-install}" in
     ;;
   --uninstall|uninstall)
     for src in "$here"/skills/*/; do uninstall_skill "${src%/}"; done
+    for name in $retired_skills; do remove_retired "$name"; done
     for file in "${instruction_files[@]}"; do uninstall_block "$file"; done
     ;;
   *)

@@ -20,12 +20,14 @@ The first [research cycle](research/README.md), in October 2026, compared the li
 - The Codex reviewer runs at the user's configured reasoning effort.
 - The review loop runs three rounds at most and names the reason it stopped.
 - A reviewer that runs too long is stopped, and a Codex reviewer is then asked for its findings so far.
-- `ship` starts only when the user calls it by name.
+- `ship`, now `land`, starts only when the user calls it by name.
 - This repository has an `AGENTS.md` and checks of its own.
 
 Since then, each skill names its scripts relative to its own folder, and `./install.sh --check` reports whether the installed copies match this repository. The review loop now takes the CLIs' own review tests, gets its findings as JSON, has a second reviewer try to disprove them, keeps a ledger of every finding, and logs every round. The design review takes its screenshots with Playwright: the whole page in readable tiles, tablet, phone, dark mode and keyboard focus, a canary image that proves the reviewer saw them, and a Lighthouse accessibility audit. Only the reviewer sees those screenshots: the user gets the live page, opened in a browser tab and left running for them to try, in a Superset workspace through the `superset` CLI, checked on version 1.36.0. The Codex reviewer keeps the loop's own prompt rather than Codex's `review` command, which found one more bug in a two-case comparison but replies in a format the loop would have to parse; the prompt took over that command's rule not to stop at the first finding.
 
 In November 2026 `ask-gemini` added Gemini 4 Argon as a specialist, run headless through the Antigravity CLI, `agy` 1.4.12, on a Google AI Pro plan. Before it was built, a test showed Argon reading a short clip and naming its colours, their times and a spoken number correctly, and showed that it can't reach anything outside its own folder. Claude Code and Codex then each ran the installed skill on that clip from start to finish. The reviewers can also run at maximum strength: `REVIEWER_STRENGTH=max` picks the strongest model and effort each harness offers, and the review log records the strength, model and effort of every round.
+
+On 24 November 2026 Claude Code 2.1.331 began bundling a `/ship` command of its own, which a user skill of that name can't override: Claude Code skips the skill and says so at startup. The built-in pushes, opens a pull request and watches it, but never merges, so `ship` became `land`, and the installer removes the old installed copy.
 
 ## The skills
 
@@ -36,10 +38,10 @@ In November 2026 `ask-gemini` added Gemini 4 Argon as a specialist, run headless
 | `review-loop` | Code review by the other agent, fixes, and repeat while the findings keep falling; then a commit |
 | `save-review` | The reviewer writes its findings to `.local/review.md` for another agent |
 | `apply-review` | The builder fixes the findings it agrees with and asks the user about the rest |
-| `ship` | Checks, commit, take in the default branch, push, pull request, squash-merge; only when the user calls it by name |
+| `land` | Checks, commit, take in the default branch, push, pull request, squash-merge; only when the user calls it by name |
 | `ask-gemini` | Gemini 4 Argon watches a video, listens to audio or gives an independent second opinion; for Gmail, Drive and a Gemini Notebook, a prompt the user runs in Google's apps |
 
-`instructions/` holds the default sequence for any task that adds or changes behaviour: plan, plan review, the user's go-ahead, build and the project's checks, design review where a page changed, the user's feedback, the code review loop, commit. Shipping only when the user calls `ship` by name: `/ship` in Claude Code, `$ship` in Codex.
+`instructions/` holds the default sequence for any task that adds or changes behaviour: plan, plan review, the user's go-ahead, build and the project's checks, design review where a page changed, the user's feedback, the code review loop, commit. Shipping only when the user calls `land` by name: `/land` in Claude Code, `$land` in Codex. Claude Code's own `/ship` is a different command: it pushes, opens a pull request and watches it, but never merges.
 
 What lets the review loop run unsupervised:
 
@@ -58,14 +60,14 @@ What lets the review loop run unsupervised:
 
 This copies each skill to `~/.agents/skills/<name>`, which Codex reads, links it from `~/.claude/skills/<name>`, which Claude Code reads, and adds the instruction block to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. Run it again after changing anything here. `./install.sh --check` reports each installed skill and instruction block as current, changed or missing, and notes when a CLI differs from the version `tests/live.sh` last passed on. `./install.sh --uninstall` removes exactly what it installed.
 
-Every installed copy carries a marker that names the commit it came from. The installer refuses to replace a same-name skill it didn't create, and removes only marked copies. Edit the source here and reinstall; edits made to installed copies are overwritten. A script that several skills use, such as the reviewer runner, is a symlink here and becomes a file of its own in each installed copy.
+Every installed copy carries a marker that names the commit it came from. The installer refuses to replace a same-name skill it didn't create, and removes only marked copies. A skill that was renamed or dropped is listed in `retired_skills` at the top of `install.sh`: installing and uninstalling remove its marked copy, and `--check` reports one left behind as stale. Edit the source here and reinstall; edits made to installed copies are overwritten. A script that several skills use, such as the reviewer runner, is a symlink here and becomes a file of its own in each installed copy.
 
 Both locations are needed. Claude Code does not read `~/.agents/skills` itself but follows the symlink from `~/.claude/skills`. Codex also still reads `~/.codex/skills`, so a same-name skill there would shadow the installed one; the installer warns when it finds one. Both were checked on the versions above.
 
 ## What a project needs
 
 - An `AGENTS.md` that says how to run its checks, such as tests and a typecheck. The skills refer to "the project's checks" and look there. Claude Code reads a project `AGENTS.md` natively since version 2.1.277 when there is no `CLAUDE.md`; a `CLAUDE.md` containing `@AGENTS.md` still works.
-- A GitHub remote, for `ship`.
+- A GitHub remote, for `land`.
 - Google Chrome and Node.js, for `review-design`. Its scripts fetch Playwright 1.63.0 and Lighthouse 13.5.0 through `npx` on first use and drive the installed Chrome, so no browser is downloaded.
 - `agy`, the Antigravity CLI, signed in with a paid Google AI Pro account, for `ask-gemini`, and ffmpeg for its frame checks. Its runs count against the plan's weekly Argon allowance, whose size Google doesn't publish.
 

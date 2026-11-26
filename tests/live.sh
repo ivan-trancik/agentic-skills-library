@@ -9,7 +9,7 @@
 #
 #   tests/live.sh [section ...]
 #
-# Sections, in the order they run: claude, codex, deadline, ship, paths, findings,
+# Sections, in the order they run: claude, codex, deadline, land, paths, findings,
 # refute, weakened, design, gemini, strength, cost.
 set -euo pipefail
 
@@ -133,13 +133,13 @@ check "it finished in ${elapsed}s, under 120s" [ "$elapsed" -lt 120 ]
 check "no Codex process is left running" no_codex_left
 fi
 
-if wanted ship; then
-echo "ship skill, invoked by name only"
+if wanted land; then
+echo "land skill, invoked by name only"
 probe="$tmp/ship-probe"
 mkdir -p "$probe/.agents/skills" "$probe/.claude/skills"
 git -C "$probe" init -q
-cp -R "$here/skills/ship" "$probe/.agents/skills/zz-ship-probe"
-perl -0pi -e 's/^name: ship$/name: zz-ship-probe/m;
+cp -R "$here/skills/land" "$probe/.agents/skills/zz-ship-probe"
+perl -0pi -e 's/^name: land$/name: zz-ship-probe/m;
   s/\n---\n/\n---\n\nThis is a probe copy of a skill. Reply with the probe word PLUM-7351, then stop: run no command and change nothing.\n/' \
   "$probe/.agents/skills/zz-ship-probe/SKILL.md"
 ln -s ../../.agents/skills/zz-ship-probe "$probe/.claude/skills/zz-ship-probe"
